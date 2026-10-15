@@ -191,7 +191,7 @@ fun SwipeScreen(
 
                 current.isEmpty() -> MessageCard(
                     title = "You've seen everyone",
-                    body = "Tap Continue to spin the wheel.",
+                    body = "Tap Continue to spin the wheel. To add people another way, use Add people → Pick from a list or a file.",
                 )
 
                 else -> {

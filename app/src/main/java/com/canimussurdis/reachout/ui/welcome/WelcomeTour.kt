@@ -208,7 +208,7 @@ fun WelcomeTour(
                     Text(
                         when {
                             !firstTime -> "Done"
-                            offerDemo -> "Use my contacts"
+                            offerDemo -> "Let's go"
                             else -> "Let's go"
                         }
                     )
@@ -239,8 +239,8 @@ private val BODIES = listOf(
     "A gentle nudge to keep in touch with the people you care about, a few at a time.\n\n" +
         "Reach Out only reads your contacts. It never changes, adds or deletes anything, " +
         "and everything stays on your phone.",
-    "Swipe right to keep someone, or left to pass. After 3 swipes a Continue button appears, " +
-        "but you can keep going as long as you like.\n\n" +
+    "Tap Add people whenever you're ready, then swipe right to keep someone or left to pass. " +
+        "You can also pick from a list or a contacts file.\n\n" +
         "Changed your mind? You can fix it any time in Settings → Contacts.",
     "Each week (on Sunday, unless you pick another day), up to 12 people from your list go on " +
         "the wheel. Spin it and let it choose who to reach out to.\n\n" +
@@ -254,8 +254,8 @@ private val BODIES = listOf(
 )
 
 private fun lastBody(firstTime: Boolean, offerDemo: Boolean) = when {
-    offerDemo -> "Start with your own contacts, or try it out with 20 pretend people first. " +
-        "You can turn demo mode on or off any time in Settings.\n\n" +
+    offerDemo -> "Tap Add people on the wheel when you're ready. Nothing is read from your contacts until you " +
+        "choose. Or try it out with 20 pretend people first (demo mode, which you can turn off in Settings).\n\n" +
         "You can see this tour again from Settings."
     firstTime -> "Demo mode is on, so you'll be using pretend people. " +
         "You can turn it off any time in Settings.\n\nYou can see this tour again from Settings."

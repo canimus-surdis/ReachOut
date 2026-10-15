@@ -8,9 +8,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -22,7 +27,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -30,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import com.canimussurdis.reachout.data.FirstRun
 import com.canimussurdis.reachout.data.NotYetMode
 import com.canimussurdis.reachout.data.ReachOutRepository
@@ -41,9 +46,6 @@ import com.canimussurdis.reachout.ui.swipe.SwipeScreen
 import com.canimussurdis.reachout.ui.theme.ReachOutTheme
 import com.canimussurdis.reachout.ui.welcome.WelcomeTour
 import com.canimussurdis.reachout.ui.wheel.WheelScreen
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -127,22 +129,22 @@ private fun AppScreens(
     settingsVersion: Int,
     onSettingsChanged: () -> Unit,
 ) {
-    var screen by rememberSaveable { mutableStateOf(Screen.SWIPE) }
-    var settingsReturnTo by rememberSaveable { mutableStateOf(Screen.SWIPE) }
-    var firstLaunch by rememberSaveable { mutableStateOf(true) }
+    // The app always opens on the wheel. Contacts are only read when you choose to add people.
+    var screen by rememberSaveable { mutableStateOf(Screen.WHEEL) }
+    var settingsReturnTo by rememberSaveable { mutableStateOf(Screen.WHEEL) }
     var answered by remember { mutableIntStateOf(0) }
     val dataVersion = resumeCount + answered + settingsVersion
 
     // A tapped reminder always lands on the wheel.
     LaunchedEffect(openRequest) {
         if (openRequest != null) {
-            firstLaunch = false
             screen = Screen.WHEEL
         }
     }
 
     var settingsAtImport by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    // "Add people" asks how, every time.
+    var choosingSource by remember { mutableStateOf(false) }
 
     // Welcome tour: shown the first time the app opens after each install, and from Settings.
     val context = LocalContext.current
@@ -155,17 +157,9 @@ private fun AppScreens(
         screen = Screen.SETTINGS
     }
 
-    /** "Add more people": swipe if there's anyone left, otherwise go to Import contacts. */
+    /** "Add people": let the person choose how. Nothing is read from contacts until they do. */
     fun addMorePeople() {
-        scope.launch {
-            val left = withContext(Dispatchers.IO) { runCatching { repo.loadSwipeDeck().size }.getOrNull() }
-            // No contacts permission yet (null): go to the swipe screen, which asks for it.
-            if (left == 0) {
-                openSettings(atImport = true)
-            } else {
-                screen = Screen.SWIPE
-            }
-        }
+        choosingSource = true
     }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -188,18 +182,16 @@ private fun AppScreens(
                 modifier = padded,
             )
         } else when (screen) {
-            Screen.SWIPE -> SwipeScreen(
-                repo = repo,
-                onContinue = {
-                    firstLaunch = false
-                    screen = Screen.WHEEL
-                },
-                onOpenMenu = { openSettings() },
-                modifier = padded,
-                autoContinueWhenEmpty = firstLaunch,
-            )
+            Screen.SWIPE -> {
+                BackHandler { screen = Screen.WHEEL }
+                SwipeScreen(
+                    repo = repo,
+                    onContinue = { screen = Screen.WHEEL },
+                    onOpenMenu = { openSettings() },
+                    modifier = padded,
+                )
+            }
             Screen.WHEEL -> {
-                BackHandler { screen = Screen.SWIPE }
                 WheelScreen(
                     repo = repo,
                     dataVersion = dataVersion,
@@ -226,6 +218,40 @@ private fun AppScreens(
                 DataInspectorScreen(repo = repo, onBack = { screen = Screen.SETTINGS }, modifier = padded)
             }
         }
+    }
+
+    if (choosingSource && !showTour) {
+        val demo = repo.settings.demoMode
+        AlertDialog(
+            onDismissRequest = { choosingSource = false },
+            title = { Text("Add people", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        if (demo) {
+                            "Demo mode is on, so these use pretend people."
+                        } else {
+                            "How would you like to add people? Your contacts are only read when you choose."
+                        }
+                    )
+                    Button(
+                        onClick = {
+                            choosingSource = false
+                            screen = Screen.SWIPE
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Swipe through contacts") }
+                    OutlinedButton(
+                        onClick = {
+                            choosingSource = false
+                            openSettings(atImport = true)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Pick from a list or a file") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingSource = false }) { Text("Not now") } },
+        )
     }
 
     // "Did you connect?" comes first whenever you return to the app.

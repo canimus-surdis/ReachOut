@@ -44,9 +44,15 @@ internal val GUIDE: List<GuideSection> = listOf(
         summary = "How Reach Out works, in one minute",
         items = listOf(
             GuideItem(
+                "Add people",
+                "The app opens on the wheel. Tap Add people (or + Add more people) whenever you like and choose how: " +
+                    "swipe through your contacts, or pick from a list or a contacts file. Your contacts are only read " +
+                    "when you choose.",
+            ),
+            GuideItem(
                 "Swipe",
                 "Swipe right to keep someone on your list, or left to pass. A Continue button appears after 3 swipes, " +
-                    "but you can keep swiping as long as you like.",
+                    "but you can keep swiping as long as you like. Back returns to the wheel.",
             ),
             GuideItem(
                 "The wheel",
@@ -115,8 +121,9 @@ internal val GUIDE: List<GuideSection> = listOf(
             ),
             GuideItem(
                 "Good to know",
-                "The first two options need contacts access, which you allow on the swipe screen. People already on your " +
-                    "list, or ones you passed on, are skipped. Your phone's contacts are never changed.",
+                "You can also get here from the wheel: Add people → Pick from a list or a file. The first two options ask " +
+                    "for contacts access (read only) the first time. People already on your list, or ones you passed on, " +
+                    "are skipped. Your phone's contacts are never changed.",
             ),
         ),
     ),
@@ -197,7 +204,7 @@ internal val GUIDE: List<GuideSection> = listOf(
             ),
             GuideItem(
                 "Only between",
-                "The hours a reminder can arrive, set in half-hour steps and at least an hour long. The default is " +
+                "The hours a reminder can arrive. Tap From or Until and type a time; the window must be at least an hour long. The default is " +
                     "5 pm to 9 pm. Each reminder lands at a random time inside it. 1-hour snoozes also wait for this window.",
             ),
             GuideItem("Next reminder", "When the next nudge is planned."),
@@ -285,10 +292,12 @@ internal val GUIDE: List<GuideSection> = listOf(
             ),
             GuideItem(
                 "Time travel",
-                "Only in demo mode. +1 day, +1 week, +1 month and Next batch day let you see breaks end and new names arrive " +
-                    "without waiting.",
+                "Only in demo mode. Tap Pretend time to type any hour and minute on the pretend day. +1 day, +1 week, " +
+                    "+1 month and Next batch day let you see breaks end and new names arrive without waiting. " +
+                    "Reminders follow the pretend clock, and jumping past a planned reminder delivers it.",
             ),
             GuideItem("Reset demo", "Starts the demo over from the beginning."),
+            GuideItem("Send a test reminder now", "Shows a reminder notification straight away, to check notifications work."),
             GuideItem(
                 "Open test tools",
                 "A behind-the-scenes view of the swipe deck, the wheel, cooldowns and reminders, for checking that " +
@@ -315,7 +324,8 @@ internal val GUIDE: List<GuideSection> = listOf(
         items = listOf(
             GuideItem(
                 "Contacts (read only)",
-                "Used to show names, numbers and photos. Reach Out never adds, changes or deletes anything in your contacts.",
+                "Only read when you choose to add people, to show names, numbers and photos. Reach Out never adds, " +
+                    "changes or deletes anything in your contacts.",
             ),
             GuideItem("Notifications", "Used only for reminders. You can turn them off in your phone's settings."),
             GuideItem(

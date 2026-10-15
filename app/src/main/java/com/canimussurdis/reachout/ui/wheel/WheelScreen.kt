@@ -259,7 +259,7 @@ fun WheelScreen(
             contentAlignment = Alignment.Center,
         ) {
             if (slots.isEmpty() || (everyoneDone && !reveal)) {
-                EmptyWheel(onAddPeople)
+                EmptyWheel(hasPeople = snap.accepted.isNotEmpty(), onAddPeople = onAddPeople)
             } else {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                 val textColor = MaterialTheme.colorScheme.onSurface
@@ -379,7 +379,7 @@ fun WheelScreen(
             ) {
                 Text(
                     "Nobody else is ready to join the wheel, so empty spots stay empty. " +
-                        "Tap here to swipe right on more people.",
+                        "Tap here to add more people.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(12.dp),
@@ -534,20 +534,21 @@ private fun ActionButton(emoji: String, label: String, enabled: Boolean, onClick
 }
 
 @Composable
-private fun EmptyWheel(onAddPeople: () -> Unit) {
+private fun EmptyWheel(hasPeople: Boolean, onAddPeople: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "Everyone's been contacted.",
+            if (hasPeople) "Everyone's been contacted." else "Your wheel is empty",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
         Text(
-            "Swipe more people?",
+            if (hasPeople) "Add more people?" else "Add a few people to get started. You choose how.",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
-        Button(onClick = onAddPeople) { Text("Swipe more people") }
+        Button(onClick = onAddPeople) { Text("Add people") }
     }
 }
 

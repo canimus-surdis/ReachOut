@@ -11,6 +11,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,14 +37,18 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -59,6 +64,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -279,6 +285,31 @@ fun SettingsScreen(
     var editing by remember { mutableStateOf<Int?>(null) }
     var draft by remember { mutableStateOf("") }
 
+    // Import asks for contacts access itself (read only), then carries on with what you tapped.
+    fun openPick() {
+        fileCandidates = null
+        selected = emptySet()
+        query = ""
+        page = Page.PICK
+    }
+    var afterAccess by remember { mutableStateOf<String?>(null) }
+    val askContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val next = afterAccess
+        afterAccess = null
+        changed()
+        if (!granted) {
+            toast("Contacts access is off. Allow it in your phone's Settings → Apps → Reach Out → Permissions, or import from a file.")
+        } else if (next == "pick") {
+            openPick()
+        } else if (next == "all") {
+            confirmAddAll = true
+        }
+    }
+    fun withContacts(next: String) {
+        afterAccess = next
+        askContacts.launch(Manifest.permission.READ_CONTACTS)
+    }
+
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier
@@ -378,21 +409,22 @@ fun SettingsScreen(
                     },
                 )
                 Page.IMPORT -> importPage(
-                    showOutOfPeople = startAtImport,
+                    showOutOfPeople = canRead && deck?.isEmpty() == true,
                     canRead = canRead,
                     newCount = deck?.size,
                     onPick = {
                         if (canRead) {
-                            fileCandidates = null
-                            selected = emptySet()
-                            query = ""
-                            page = Page.PICK
+                            openPick()
                         } else {
-                            toast("Allow contacts access on the swipe screen first.")
+                            withContacts("pick")
                         }
                     },
                     onAddAll = {
-                        if (canRead) confirmAddAll = true else toast("Allow contacts access on the swipe screen first.")
+                        if (canRead) {
+                            confirmAddAll = true
+                        } else {
+                            withContacts("all")
+                        }
                     },
                     onFile = { openVcf.launch(arrayOf("text/x-vcard", "text/vcard", "text/directory", "application/octet-stream")) },
                 )
@@ -461,6 +493,13 @@ fun SettingsScreen(
                     onTravel = { repo.timeTravel(it); changed() },
                     onNextBatch = { repo.jumpToNextBatchDay(); changed() },
                     onReset = { repo.resetDemo(); changed() },
+                    onTestReminder = {
+                        if (Reminders.notificationsAllowed(context)) {
+                            Reminders.showRegularNow(context)
+                        } else {
+                            toast("Notifications are off for Reach Out. Turn them on in Settings → Reminders.")
+                        }
+                    },
                     onOpenTestTools = onOpenTestTools,
                 )
             }
@@ -508,9 +547,12 @@ fun SettingsScreen(
             title = { Text("Add everyone?") },
             text = {
                 Text(
-                    if (everyone.isEmpty()) "You've already swiped on everyone in your phone."
-                    else "This adds all ${everyone.size} people you haven't swiped on to your list. " +
-                        "You can remove anyone later in Settings → Contacts."
+                    when {
+                        deck == null -> "Counting the people you haven't swiped on…"
+                        everyone.isEmpty() -> "You've already swiped on everyone in your phone."
+                        else -> "This adds all ${everyone.size} people you haven't swiped on to your list. " +
+                            "You can remove anyone later in Settings → Contacts."
+                    }
                 )
             },
             confirmButton = {
@@ -769,7 +811,7 @@ private fun LazyListScope.importPage(
         }
     }
     if (!canRead) {
-        item { Note("To import from your phone, allow contacts access on the swipe screen first. Importing from a file works without it.") }
+        item { Note("The first two ask for contacts access (read only) the first time you use them. Importing from a file works without it.") }
     }
     item {
         Note("Your phone's contacts are never changed. People already on your list, or ones you passed on, are skipped.")
@@ -954,30 +996,11 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
             }
         }
     }
-    item {
-        Group("Only between") {
-            Stepper(
-                "From",
-                clock(s.windowStartMin),
-                canMinus = s.windowStartMin >= 30,
-                canPlus = s.windowStartMin + 60 <= s.windowEndMin,
-                onMinus = { update { it.copy(windowStartMin = it.windowStartMin - 30) } },
-                onPlus = { update { it.copy(windowStartMin = it.windowStartMin + 30) } },
-            )
-            Stepper(
-                "Until",
-                clock(s.windowEndMin),
-                canMinus = s.windowEndMin - 60 >= s.windowStartMin,
-                canPlus = s.windowEndMin + 30 <= 23 * 60 + 30,
-                onMinus = { update { it.copy(windowEndMin = it.windowEndMin - 30) } },
-                onPlus = { update { it.copy(windowEndMin = it.windowEndMin + 30) } },
-            )
-            Note("Reminders and 1-hour snoozes only arrive inside this window.")
-        }
-    }
+    item { ReminderWindow(s, update) }
     item {
         Text(
-            "Next reminder: " + (s.nextReminderAt?.let { dateTime(it) } ?: "not planned"),
+            "Next reminder: " + (s.nextReminderAt?.let { dateTime(it) } ?: "not planned") +
+                if (s.demoMode && s.nextReminderAt != null) " (pretend clock)" else "",
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
@@ -1083,6 +1106,7 @@ private fun LazyListScope.demoPage(
     onTravel: (Long) -> Unit,
     onNextBatch: () -> Unit,
     onReset: () -> Unit,
+    onTestReminder: () -> Unit,
     onOpenTestTools: () -> Unit,
 ) {
     item {
@@ -1098,7 +1122,7 @@ private fun LazyListScope.demoPage(
     if (s.demoMode) {
         item {
             Group("Time travel") {
-                Text("Pretend it's: ${dateTime(now)}", fontWeight = FontWeight.SemiBold)
+                DemoClock(now, onTravel)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { onTravel(Schedule.DAY_MS) }, modifier = Modifier.weight(1f)) { Text("+1 day") }
                     OutlinedButton(onClick = { onTravel(7 * Schedule.DAY_MS) }, modifier = Modifier.weight(1f)) { Text("+1 week") }
@@ -1108,6 +1132,16 @@ private fun LazyListScope.demoPage(
                     OutlinedButton(onClick = onNextBatch, modifier = Modifier.weight(1f)) { Text("Next batch day") }
                 }
                 TextButton(onClick = onReset) { Text("Reset demo") }
+            }
+        }
+        item {
+            Group("Reminders in demo mode") {
+                Note(
+                    "Reminders follow the pretend clock. Jumping past a planned reminder delivers it right away. " +
+                        "Reminders only come on the days and hours set in Settings → Reminders, and only once " +
+                        "you've kept at least one person."
+                )
+                OutlinedButton(onClick = onTestReminder, modifier = Modifier.fillMaxWidth()) { Text("Send a test reminder now") }
             }
         }
     }
@@ -1359,6 +1393,129 @@ private fun hasContactsPermission(context: Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
 private fun dayName(d: DayOfWeek) = d.getDisplayName(TextStyle.FULL, Locale.getDefault())
+
+/** "Only between": two time fields. Tap one to type a new time. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReminderWindow(s: Settings, update: ((Settings) -> Settings) -> Unit) {
+    // null = no dialog, true = editing From, false = editing Until
+    var editing by remember { mutableStateOf<Boolean?>(null) }
+    val stacked = LocalDensity.current.fontScale >= 1.25f
+
+    Group("Only between") {
+        if (stacked) {
+            TimeField("From", clock(s.windowStartMin), Modifier.fillMaxWidth()) { editing = true }
+            TimeField("Until", clock(s.windowEndMin), Modifier.fillMaxWidth()) { editing = false }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TimeField("From", clock(s.windowStartMin), Modifier.weight(1f)) { editing = true }
+                TimeField("Until", clock(s.windowEndMin), Modifier.weight(1f)) { editing = false }
+            }
+        }
+        Note("Tap a time to change it. Reminders and 1-hour snoozes only arrive inside this window.")
+    }
+
+    val isStart = editing ?: return
+    key(isStart) {
+        val current = if (isStart) s.windowStartMin else s.windowEndMin
+        val state = rememberTimePickerState(initialHour = current / 60, initialMinute = current % 60, is24Hour = false)
+        val picked = state.hour * 60 + state.minute
+        val problem = if (isStart) {
+            if (picked > s.windowEndMin - 60) "Choose a time at least 1 hour before ${clock(s.windowEndMin)}." else null
+        } else {
+            if (picked < s.windowStartMin + 60) "Choose a time at least 1 hour after ${clock(s.windowStartMin)}." else null
+        }
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text(if (isStart) "Reminders from" else "Reminders until") },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TimeInput(state = state)
+                    if (problem != null) {
+                        Text(
+                            problem,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = problem == null,
+                    onClick = {
+                        update { if (isStart) it.copy(windowStartMin = picked) else it.copy(windowEndMin = picked) }
+                        editing = null
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Time travel: the pretend date, plus an editable pretend time of day. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DemoClock(now: Long, onTravel: (Long) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    val zone = ZoneId.systemDefault()
+    val here = Instant.ofEpochMilli(now).atZone(zone)
+    val minuteOfDay = here.hour * 60 + here.minute
+
+    Text(
+        "Pretend it's " + here.format(DateTimeFormatter.ofPattern("EEEE, MMM d")),
+        fontWeight = FontWeight.SemiBold,
+    )
+    TimeField("Pretend time", clock(minuteOfDay), Modifier.fillMaxWidth()) { editing = true }
+    Note("Tap the time to type a new hour and minute on the same day. Earlier times work too.")
+
+    if (editing) {
+        val state = rememberTimePickerState(initialHour = here.hour, initialMinute = here.minute, is24Hour = false)
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Pretend time") },
+            text = { TimeInput(state = state) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = here.toLocalDate().atTime(state.hour, state.minute).atZone(zone).toInstant().toEpochMilli()
+                    onTravel(target - now)
+                    editing = false
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Looks like a form field; tapping it opens the time editor. */
+@Composable
+private fun TimeField(label: String, value: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .clickable(onClickLabel = "Change the $label time", role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Text("✎", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    }
+}
 
 private fun clock(minuteOfDay: Int): String =
     LocalTime.of(minuteOfDay / 60 % 24, minuteOfDay % 60).format(DateTimeFormatter.ofPattern("h:mm a"))
