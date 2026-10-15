@@ -81,6 +81,10 @@ fun SwipeScreen(
     modifier: Modifier = Modifier,
     /** On app launch: if there's nobody new to swipe, go straight to the wheel. */
     autoContinueWhenEmpty: Boolean = false,
+    /** Only show these people (the ones you removed); go to the wheel once they're all decided. */
+    onlyIds: Set<String>? = null,
+    /** People chosen in Import contacts (from your phone or a file): swipe on just these, then go to the wheel. */
+    presetDeck: List<Contact>? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -100,13 +104,25 @@ fun SwipeScreen(
         hasPermission = granted
         askedOnce = true
     }
-    val canLoad = demoMode || hasPermission
+    // A list picked in Import contacts is already in hand, so it doesn't need contacts access.
+    val canLoad = demoMode || hasPermission || presetDeck != null
 
     // null = still loading
     var deck by remember { mutableStateOf<List<Contact>?>(null) }
-    LaunchedEffect(canLoad, demoMode) {
-        deck = if (canLoad) {
-            withContext(Dispatchers.IO) { runCatching { repo.loadSwipeDeck() }.getOrDefault(emptyList()) }
+    LaunchedEffect(canLoad, demoMode, onlyIds, presetDeck) {
+        deck = if (presetDeck != null) {
+            val known = repo.knownIds()
+            presetDeck.filter { it.id !in known }.shuffled()
+        } else if (canLoad) {
+            val all = withContext(Dispatchers.IO) { runCatching { repo.loadSwipeDeck() }.getOrDefault(emptyList()) }
+            if (onlyIds == null) {
+                all
+            } else {
+                val wanted = all.filter { it.id in onlyIds }
+                // Anyone missing from your contacts now can't be shown: stop waiting for them.
+                repo.dropReswipe(onlyIds - wanted.map { it.id }.toSet())
+                wanted
+            }
         } else {
             emptyList()
         }
@@ -121,7 +137,9 @@ fun SwipeScreen(
     }
 
     LaunchedEffect(deck) {
-        if (autoContinueWhenEmpty && canLoad && deck?.isEmpty() == true && repo.snapshot().accepted.isNotEmpty()) {
+        if ((onlyIds != null || presetDeck != null) && canLoad && deck?.isEmpty() == true) {
+            onContinue() // everyone you picked (or removed) has been decided on
+        } else if (autoContinueWhenEmpty && canLoad && deck?.isEmpty() == true && repo.snapshot().accepted.isNotEmpty()) {
             onContinue()
         }
     }
@@ -166,6 +184,16 @@ fun SwipeScreen(
                 modifier = Modifier.weight(1f),
             )
             MenuButton(onClick = onOpenMenu)
+        }
+        if ((onlyIds != null || presetDeck != null) && canLoad && deck?.isNotEmpty() == true) {
+            val who = if (deck?.size == 1) "this person" else "these people"
+            Text(
+                if (presetDeck != null) "Keep or pass on $who you picked. ${deck?.size} to go."
+                else "You removed $who from your list. Keep or pass?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
 
         // Card area

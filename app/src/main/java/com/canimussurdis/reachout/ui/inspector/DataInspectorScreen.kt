@@ -317,7 +317,7 @@ fun DataInspectorScreen(repo: ReachOutRepository, onBack: () -> Unit, modifier: 
                     },
                 )
                 Text(
-                    "Reminders use the real clock, so demo time travel doesn't move them.",
+                    "In demo mode, reminders follow the pretend clock. Time travel past a planned reminder delivers it.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

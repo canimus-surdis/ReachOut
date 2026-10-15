@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,11 +36,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import com.canimussurdis.reachout.data.Contact
 import com.canimussurdis.reachout.data.FirstRun
 import com.canimussurdis.reachout.data.NotYetMode
 import com.canimussurdis.reachout.data.ReachOutRepository
 import com.canimussurdis.reachout.data.ThemeMode
 import com.canimussurdis.reachout.reminders.Reminders
+import com.canimussurdis.reachout.ui.common.Confetti
 import com.canimussurdis.reachout.ui.inspector.DataInspectorScreen
 import com.canimussurdis.reachout.ui.settings.SettingsScreen
 import com.canimussurdis.reachout.ui.swipe.SwipeScreen
@@ -52,6 +55,9 @@ class MainActivity : ComponentActivity() {
     /** Goes up every time the app comes back to the foreground (e.g. after a call or text). */
     private val resumeCount = mutableIntStateOf(0)
 
+    /** Goes up every time the app is opened or brought back from the background (not for pop-ups like permission requests). */
+    private val openCount = mutableIntStateOf(0)
+
     /** Set when a reminder notification is tapped. */
     private val openRequest = mutableStateOf<OpenRequest?>(null)
 
@@ -62,7 +68,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         Reminders.rescheduleAll(applicationContext)
         setContent {
-            AppRoot(repo, resumeCount.intValue, openRequest.value)
+            AppRoot(repo, resumeCount.intValue, openCount.intValue, openRequest.value)
         }
     }
 
@@ -70,6 +76,11 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        openCount.intValue++
     }
 
     override fun onResume() {
@@ -93,7 +104,7 @@ data class OpenRequest(val contactId: String?, val nonce: Long)
 private enum class Screen { SWIPE, WHEEL, SETTINGS, TOOLS }
 
 @Composable
-private fun AppRoot(repo: ReachOutRepository, resumeCount: Int, openRequest: OpenRequest?) {
+private fun AppRoot(repo: ReachOutRepository, resumeCount: Int, openCount: Int, openRequest: OpenRequest?) {
     var settingsVersion by remember { mutableIntStateOf(0) }
     val settings = remember(settingsVersion) { repo.settings }
     val dark = when (settings.themeMode) {
@@ -110,13 +121,13 @@ private fun AppRoot(repo: ReachOutRepository, resumeCount: Int, openRequest: Ope
         activity?.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
 
-    ReachOutTheme(darkTheme = dark) {
+    ReachOutTheme(darkTheme = dark, palette = settings.palette) {
         // Text size setting scales all text in the app.
         val density = LocalDensity.current
         CompositionLocalProvider(
             LocalDensity provides Density(density.density, density.fontScale * settings.textScale)
         ) {
-            AppScreens(repo, resumeCount, openRequest, settingsVersion) { settingsVersion++ }
+            AppScreens(repo, resumeCount, openCount, openRequest, settingsVersion) { settingsVersion++ }
         }
     }
 }
@@ -125,6 +136,7 @@ private fun AppRoot(repo: ReachOutRepository, resumeCount: Int, openRequest: Ope
 private fun AppScreens(
     repo: ReachOutRepository,
     resumeCount: Int,
+    openCount: Int,
     openRequest: OpenRequest?,
     settingsVersion: Int,
     onSettingsChanged: () -> Unit,
@@ -133,6 +145,8 @@ private fun AppScreens(
     var screen by rememberSaveable { mutableStateOf(Screen.WHEEL) }
     var settingsReturnTo by rememberSaveable { mutableStateOf(Screen.WHEEL) }
     var answered by remember { mutableIntStateOf(0) }
+    // Goes up each time you answer "Yes" to "Did you connect?", to fire the confetti.
+    var celebrate by remember { mutableIntStateOf(0) }
     val dataVersion = resumeCount + answered + settingsVersion
 
     // A tapped reminder always lands on the wheel.
@@ -143,6 +157,10 @@ private fun AppScreens(
     }
 
     var settingsAtImport by remember { mutableStateOf(false) }
+    // People you removed from your list: swiped on again the next time the app opens.
+    var reswipeOnly by remember { mutableStateOf<Set<String>?>(null) }
+    // People picked in Import contacts: swiped on next, instead of being added straight to your list.
+    var importDeck by remember { mutableStateOf<List<Contact>?>(null) }
     // "Add people" asks how, every time.
     var choosingSource by remember { mutableStateOf(false) }
 
@@ -157,67 +175,99 @@ private fun AppScreens(
         screen = Screen.SETTINGS
     }
 
+    // Each time the app is opened: if you removed people from your list, swipe on them first.
+    // (A picked person waiting on the wheel comes first, so their box isn't skipped.)
+    LaunchedEffect(openCount, showTour) {
+        if (showTour) return@LaunchedEffect
+        if (screen != Screen.WHEEL && screen != Screen.SWIPE && screen != Screen.SETTINGS) return@LaunchedEffect
+        val ids = repo.reswipeIds()
+        if (ids.isNotEmpty() && repo.currentPick() == null && importDeck == null) {
+            reswipeOnly = ids
+            screen = Screen.SWIPE
+        }
+    }
+
     /** "Add people": let the person choose how. Nothing is read from contacts until they do. */
     fun addMorePeople() {
         choosingSource = true
     }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        val padded = Modifier.padding(innerPadding)
-        if (showTour) {
-            val settings = repo.settings
-            WelcomeTour(
-                firstTime = !tourIsReplay,
-                demoOn = settings.demoMode,
-                reduceMotion = settings.reduceMotion,
-                onFinish = { tryDemo ->
-                    FirstRun.markTourSeen(context)
-                    if (tryDemo) {
-                        repo.setDemoMode(true)
-                        onSettingsChanged()
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+            val padded = Modifier.padding(innerPadding)
+            if (showTour) {
+                val settings = repo.settings
+                WelcomeTour(
+                    firstTime = !tourIsReplay,
+                    demoOn = settings.demoMode,
+                    reduceMotion = settings.reduceMotion,
+                    onFinish = { tryDemo ->
+                        FirstRun.markTourSeen(context)
+                        if (tryDemo) {
+                            repo.setDemoMode(true)
+                            onSettingsChanged()
+                        }
+                        showTour = false
+                        tourIsReplay = false
+                    },
+                    modifier = padded,
+                )
+            } else when (screen) {
+                Screen.SWIPE -> {
+                    BackHandler {
+                        reswipeOnly = null
+                        importDeck = null
+                        screen = Screen.WHEEL
                     }
-                    showTour = false
-                    tourIsReplay = false
-                },
-                modifier = padded,
-            )
-        } else when (screen) {
-            Screen.SWIPE -> {
-                BackHandler { screen = Screen.WHEEL }
-                SwipeScreen(
+                    SwipeScreen(
+                        repo = repo,
+                        onContinue = {
+                            reswipeOnly = null
+                            importDeck = null
+                            screen = Screen.WHEEL
+                        },
+                        onOpenMenu = { openSettings() },
+                        modifier = padded,
+                        onlyIds = reswipeOnly,
+                        presetDeck = importDeck,
+                    )
+                }
+                Screen.WHEEL -> {
+                    WheelScreen(
+                        repo = repo,
+                        dataVersion = dataVersion,
+                        openCount = openCount,
+                        openRequest = openRequest,
+                        onAddPeople = { addMorePeople() },
+                        onOpenMenu = { openSettings() },
+                        modifier = padded,
+                    )
+                }
+                Screen.SETTINGS -> SettingsScreen(
                     repo = repo,
-                    onContinue = { screen = Screen.WHEEL },
-                    onOpenMenu = { openSettings() },
+                    onBack = { screen = settingsReturnTo },
+                    onOpenTestTools = { screen = Screen.TOOLS },
+                    onSettingsChanged = onSettingsChanged,
+                    onShowTour = {
+                        tourIsReplay = true
+                        showTour = true
+                    },
                     modifier = padded,
+                    startAtImport = settingsAtImport,
+                    onSwipePeople = { people ->
+                        reswipeOnly = null
+                        importDeck = people
+                        screen = Screen.SWIPE
+                    },
                 )
-            }
-            Screen.WHEEL -> {
-                WheelScreen(
-                    repo = repo,
-                    dataVersion = dataVersion,
-                    openRequest = openRequest,
-                    onAddPeople = { addMorePeople() },
-                    onOpenMenu = { openSettings() },
-                    modifier = padded,
-                )
-            }
-            Screen.SETTINGS -> SettingsScreen(
-                repo = repo,
-                onBack = { screen = settingsReturnTo },
-                onOpenTestTools = { screen = Screen.TOOLS },
-                onSettingsChanged = onSettingsChanged,
-                onShowTour = {
-                    tourIsReplay = true
-                    showTour = true
-                },
-                modifier = padded,
-                startAtImport = settingsAtImport,
-            )
-            Screen.TOOLS -> {
-                BackHandler { screen = Screen.SETTINGS }
-                DataInspectorScreen(repo = repo, onBack = { screen = Screen.SETTINGS }, modifier = padded)
+                Screen.TOOLS -> {
+                    BackHandler { screen = Screen.SETTINGS }
+                    DataInspectorScreen(repo = repo, onBack = { screen = Screen.SETTINGS }, modifier = padded)
+                }
             }
         }
+        // Confetti after "Yes, we connected". Drawn on top; taps go straight through.
+        Confetti(trigger = celebrate, reduceMotion = repo.settings.reduceMotion)
     }
 
     if (choosingSource && !showTour) {
@@ -237,10 +287,12 @@ private fun AppScreens(
                     Button(
                         onClick = {
                             choosingSource = false
+                            reswipeOnly = null
+                            importDeck = null
                             screen = Screen.SWIPE
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Swipe through contacts") }
+                    ) { Text("Add all contacts") }
                     OutlinedButton(
                         onClick = {
                             choosingSource = false
@@ -262,6 +314,7 @@ private fun AppScreens(
         checks.firstOrNull()?.let { contact ->
             val answer: (Boolean) -> Unit = { connected ->
                 repo.answerCheck(contact.id, connected)
+                if (connected) celebrate++
                 checks = repo.snapshot().pendingChecks
                 confirmingNotYet = false
                 answered++
@@ -289,7 +342,7 @@ private fun AppScreens(
                             if (keepOnWheel) {
                                 "This will put ${contact.name} back into the pool, staying on this week's wheel."
                             } else {
-                                "This will put ${contact.name} back into the pool."
+                                "This will put ${contact.name} back into the pool for a future week."
                             }
                         )
                     },

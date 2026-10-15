@@ -46,7 +46,7 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem(
                 "Add people",
                 "The app opens on the wheel. Tap Add people (or + Add more people) whenever you like and choose how: " +
-                    "swipe through your contacts, or pick from a list or a contacts file. Your contacts are only read " +
+                    "Add all contacts (swipe through them one by one), or Pick from a list or a file. Your contacts are only read " +
                     "when you choose.",
             ),
             GuideItem(
@@ -62,12 +62,18 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem(
                 "Your pick",
                 "Call opens your dialer, Text opens your messages app with your message filled in, and Share lets you send " +
-                    "the message through any app. Snooze reminds you again in an hour, or puts them back in the pool. " +
-                    "The box stays open until you choose one.",
+                    "the message through any app. Snooze reminds you again in an hour, or puts them back in the pool: off this " +
+                    "week's wheel, ready to be drawn again from the next batch day. " +
+                    "The box stays open until you choose one, and opens again whenever you open the app.",
+            ),
+            GuideItem(
+                "Snooze (once per spin)",
+                "\"Remind me in 1 hour\" closes the box for now and pauses spinning. The next time you open the app, " +
+                    "or tap the reminder, their box opens again with Snooze greyed out, so it's Call, Text or Share.",
             ),
             GuideItem(
                 "Did you connect?",
-                "When you come back to the app, it asks whether you connected. Yes gives that person a break before they " +
+                "When you come back to the app, it asks whether you connected. Yes earns a burst of confetti and gives that person a break before they " +
                     "can come up again. Not yet does what you chose in Wheel → When you answer \"Not yet\".",
             ),
             GuideItem(
@@ -78,7 +84,7 @@ internal val GUIDE: List<GuideSection> = listOf(
     ),
     GuideSection(
         title = "Contacts",
-        summary = "Who's on your list, who's resting, and who you passed",
+        summary = "Who's on your list, resting, passed or ignored",
         target = GuideTarget.CONTACTS,
         buttonLabel = "Open Contacts",
         items = listOf(
@@ -92,32 +98,45 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem(
                 "On your list",
                 "Everyone you kept. Anyone with their own break shows it underneath, for example \"Break: 2 weeks – 1 month\". " +
-                    "Remove takes someone off your list and the wheel, and puts them back in the swipe deck.",
+                    "Remove takes someone off your list and the wheel. The next time you open the app, you'll swipe on them " +
+                    "again to keep or pass.",
             ),
             GuideItem(
                 "Passed",
-                "People you swiped left on. Restore puts them back in the swipe deck so you can decide again.",
+                "People you swiped left on. Restore brings them back, and the next time you open the app you'll swipe " +
+                    "on them again.",
+            ),
+            GuideItem(
+                "Ignore contacts",
+                "Tick people you never want to see as swipe cards, such as businesses or old numbers. They're also " +
+                    "left out of imports. Anyone on your list comes off it. Swiping itself doesn't change.",
+            ),
+            GuideItem(
+                "Ignored",
+                "Everyone you've ignored. Un-ignore brings them back, and the next time you open the app you'll swipe " +
+                    "on them again.",
             ),
         ),
     ),
     GuideSection(
         title = "Import contacts",
-        summary = "Add lots of people at once",
+        summary = "Pick people to swipe on, from your phone or a file",
         target = GuideTarget.IMPORT,
         buttonLabel = "Open Import contacts",
         items = listOf(
             GuideItem(
                 "Pick several at once",
-                "Tick people from your phone's contacts, then tap Add. Use Search, Select all and Clear to move faster.",
+                "Tick people from your phone's contacts, then tap Swipe on. Their swipe cards open next, so you keep or " +
+                    "pass on each one, then you're back at the wheel. Search, Select all and Clear help with long lists.",
             ),
             GuideItem(
                 "Add everyone",
-                "Adds everyone in your phone you haven't swiped on yet. You'll be asked to confirm first.",
+                "Opens swipe cards for everyone in your phone you haven't swiped on yet. You'll be asked to confirm first.",
             ),
             GuideItem(
                 "From a contacts file (.vcf)",
-                "Choose a contacts file exported from Google Contacts, iCloud, Outlook or another phone, then untick " +
-                    "anyone you don't want. This works even without contacts access.",
+                "Choose a contacts file exported from Google Contacts, iCloud, Outlook or another phone, untick anyone you " +
+                    "don't want, then swipe on the rest. This works even without contacts access.",
             ),
             GuideItem(
                 "Good to know",
@@ -174,8 +193,9 @@ internal val GUIDE: List<GuideSection> = listOf(
             ),
             GuideItem(
                 "When you answer \"Not yet\"",
-                "Back to pool (the default): they leave the wheel without a break and can come up again, even this week. " +
-                    "With New name, someone else takes their spot. Keep on wheel: they stay on this week's wheel.",
+                "Back to pool (the default): they leave this week's wheel without a break and won't come back onto it, " +
+                    "then can be drawn again from the next batch day. With New name, someone else takes their spot. " +
+                    "Keep on wheel: they stay on this week's wheel.",
             ),
             GuideItem(
                 "Hidden picture",
@@ -196,11 +216,25 @@ internal val GUIDE: List<GuideSection> = listOf(
                 "Shows only if your phone is blocking Reach Out's notifications. Open notification settings takes you " +
                     "straight there.",
             ),
-            GuideItem("How often", "Daily, Weekly, Every 2 weeks, Monthly or Yearly."),
+            GuideItem("How often", "Daily (the default), Weekly, Every 2 weeks, Monthly or Yearly."),
+            GuideItem(
+                "On these days",
+                "Weekly and Every 2 weeks: tap as many days as you like. You'll get a nudge on each one (every other " +
+                    "week for Every 2 weeks). At least one day stays picked.",
+            ),
+            GuideItem(
+                "In these months",
+                "Yearly: tap the months you want. You'll get one nudge in each, on the first chosen day of that month " +
+                    "(for example, the first Sunday). At least one month stays picked.",
+            ),
+            GuideItem(
+                "On this date",
+                "Monthly: tap the date and type a day from 1 to 31, for example the 15th. You'll get a nudge on that " +
+                    "date every month. In shorter months (like the 31st in April), it comes on the last day.",
+            ),
             GuideItem(
                 "On",
-                "Which day of the week reminders come. Monthly and Yearly arrive on that day, about a month or a year " +
-                    "after the last one. Hidden when How often is Daily.",
+                "Yearly: which day of the week, for example the first Sunday of each month you pick.",
             ),
             GuideItem(
                 "Only between",
@@ -223,7 +257,8 @@ internal val GUIDE: List<GuideSection> = listOf(
         items = listOf(
             GuideItem(
                 "Messages",
-                "Five ready-made messages. Tap one to use it for Text and Share. The default is \"Thinking about you\".",
+                "Blank plus five ready-made messages. Tap one to use it for Text and Share. The default is Blank, which " +
+                    "opens Text and Share with nothing typed, so you write your own each time.",
             ),
             GuideItem(
                 "Your own",
@@ -238,11 +273,16 @@ internal val GUIDE: List<GuideSection> = listOf(
     ),
     GuideSection(
         title = "Display",
-        summary = "Colors, text size, motion and sound",
+        summary = "Theme, color palette, text size, motion and sound",
         target = GuideTarget.DISPLAY,
         buttonLabel = "Open Display",
         items = listOf(
             GuideItem("Theme", "Follow phone matches your phone's light or dark mode. Light and Dark keep it one way."),
+            GuideItem(
+                "Color palette",
+                "Terracotta, Ocean, Lavender, Forest or Sunshine. Each has a light and a dark version, so it works with " +
+                    "any Theme choice. The three dots show the background, button and accent colors.",
+            ),
             GuideItem(
                 "Text size",
                 "Normal, Large or Extra large. This is on top of your phone's own font size.",

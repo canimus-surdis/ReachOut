@@ -1,6 +1,7 @@
 package com.canimussurdis.reachout.data
 
 import java.time.DayOfWeek
+import java.time.Month
 
 /** One phone number on a contact. */
 data class PhoneNumber(
@@ -32,7 +33,8 @@ data class Contact(
     }
 }
 
-enum class Status { ACCEPTED, REJECTED }
+/** ACCEPTED = on your list, REJECTED = passed, IGNORED = hidden from swiping and imports (Settings only). */
+enum class Status { ACCEPTED, REJECTED, IGNORED }
 
 /** What the app remembers about a contact you've swiped on. Stored only in the app's own files. */
 data class ContactRecord(
@@ -65,11 +67,13 @@ data class WheelBatch(
     val slots: List<Slot>,
     /** Contacts taken off this week's wheel. They won't be drawn again until the next batch day. */
     val retired: Set<String>,
+    /** Sent back to the pool (Snooze → Back to pool, or "Not yet"): never put back on this week's wheel. */
+    val skipped: Set<String> = emptySet(),
 )
 
 enum class ReachedMode { REFILL, REVEAL }
 
-/** NEXT_WEEK (name kept for saved settings) now means: give up the spot, but go straight back into the pool. */
+/** NEXT_WEEK ("Back to pool"): off this week's wheel, back in the pool from the next batch day. KEEP_ON_WHEEL: stays put. */
 enum class NotYetMode { NEXT_WEEK, KEEP_ON_WHEEL }
 
 data class Settings(
@@ -82,16 +86,23 @@ data class Settings(
     val cooldownMaxDays: Int = 182,
     val reachedMode: ReachedMode = ReachedMode.REFILL,
     val notYetMode: NotYetMode = NotYetMode.NEXT_WEEK,
-    /** Pre-fills Text and Share. (Presets and custom messages arrive with Settings.) */
-    val message: String = "Thinking about you",
+    /** Pre-fills Text and Share. An empty string means Blank: nothing is pre-filled. */
+    val message: String = DEFAULT_MESSAGE,
     val spinSound: Boolean = true,
     val spinVibration: Boolean = true,
     val reduceMotion: Boolean = false,
 
     // ---- Reminders ----
     val remindersOn: Boolean = true,
-    val reminderFrequency: ReminderFrequency = ReminderFrequency.WEEKLY,
+    val reminderFrequency: ReminderFrequency = ReminderFrequency.DAILY,
+    /** Yearly: which day of the week. */
     val reminderDay: DayOfWeek = DayOfWeek.SUNDAY,
+    /** Monthly: the date each month (1–31; shorter months use their last day). 0 = not chosen yet. */
+    val reminderDayOfMonth: Int = 0,
+    /** Weekly and Every 2 weeks: every day picked here. */
+    val reminderDays: Set<DayOfWeek> = setOf(DayOfWeek.SUNDAY),
+    /** Yearly: the months to remind in (on the first reminderDay of each). */
+    val reminderMonths: Set<Month> = emptySet(),
     /** Reminder window, in minutes after midnight. Default 5–9 pm. */
     val windowStartMin: Int = 17 * 60,
     val windowEndMin: Int = 21 * 60,
@@ -105,6 +116,7 @@ data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     /** 1.0 normal, 1.15 large, 1.3 extra large. */
     val textScale: Float = 1f,
+    val palette: ColorPalette = ColorPalette.TERRACOTTA,
 
     // ---- Messages ----
     val customMessages: List<String> = emptyList(),
@@ -115,17 +127,36 @@ data class Settings(
     val wheelPhotos: List<String> = emptyList(),
 ) {
     companion object {
+        /** The Blank preset: Text and Share open with nothing typed. */
+        const val BLANK_MESSAGE = ""
+
+        /** The default is Blank. */
+        const val DEFAULT_MESSAGE = BLANK_MESSAGE
+
         val BUILT_IN_MESSAGES = listOf(
-            "Thinking about you",
+            BLANK_MESSAGE,
             "Hey! It's been a while. How are you doing?",
+            "Thinking about you",
             "Saw something that reminded me of you.",
             "Hope your week is going well!",
             "Want to catch up soon?",
         )
+
+        /** How a message is shown in Settings. */
+        fun messageLabel(message: String) = if (message.isBlank()) "Blank (no message)" else message
     }
 }
 
 enum class ThemeMode(val label: String) { SYSTEM("Follow phone"), LIGHT("Light"), DARK("Dark") }
+
+/** The app's color palettes (each has a light and a dark version). Colors live in ui/theme/Theme.kt. */
+enum class ColorPalette(val label: String, val blurb: String) {
+    TERRACOTTA("Terracotta", "Warm clay and sage"),
+    OCEAN("Ocean", "Calm teal and sea glass"),
+    LAVENDER("Lavender", "Soft purple and mint"),
+    FOREST("Forest", "Leafy green and moss"),
+    SUNSHINE("Sunshine", "Golden honey and leaf"),
+}
 
 enum class PictureSource(val label: String) { DESIGNS("Designs"), PHOTOS("My photos"), MIX("Mix") }
 
@@ -141,8 +172,12 @@ enum class ReminderFrequency(val label: String) {
 class AppState(
     val records: LinkedHashMap<String, ContactRecord> = linkedMapOf(),
     var batch: WheelBatch? = null,
-    /** The person the wheel picked, until you Call, Text, Share or Snooze. */
+    /** The person the wheel picked, until you Call, Text, Share or put them back in the pool. */
     var currentPick: String? = null,
+    /** True once the current pick has used its one snooze. */
+    var pickSnoozed: Boolean = false,
+    /** People you removed (or restored from Passed): swipe on them again the next time the app opens. */
+    val reswipe: LinkedHashSet<String> = linkedSetOf(),
 )
 
 // ---- Read-only views handed to the screens ----
@@ -163,6 +198,8 @@ data class Snapshot(
     val cooldowns: List<CooldownView>,
     val accepted: List<Contact>,
     val rejected: List<Contact>,
+    /** Hidden from swiping and imports until un-ignored. */
+    val ignored: List<Contact> = emptyList(),
     /** Accepted people who could still fill an empty wheel spot this week. */
     val spareForWheel: Int = 0,
     /** Contact id → their custom break (shortest days to longest days). */

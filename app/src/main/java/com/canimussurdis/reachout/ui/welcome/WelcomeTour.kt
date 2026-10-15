@@ -246,11 +246,11 @@ private val BODIES = listOf(
         "the wheel. Spin it and let it choose who to reach out to.\n\n" +
         "A reminder can nudge you between 5 and 9 pm.",
     "Call, Text and Share open your phone's own apps with your message ready to go.\n\n" +
-        "Not a good moment? Snooze to be reminded in an hour, or put them back in the pool. " +
+        "Not a good moment? Snooze once to be reminded in an hour, or put them back in the pool. " +
         "The box stays open until you choose, so nobody slips away.",
     "When you come back to the app, it asks whether you connected.\n\n" +
         "Yes gives that person a break (a random 1 week to 6 months) before they can come up again. " +
-        "Not yet puts them straight back in the pool.",
+        "Not yet puts them back in the pool for a future week.",
 )
 
 private fun lastBody(firstTime: Boolean, offerDemo: Boolean) = when {

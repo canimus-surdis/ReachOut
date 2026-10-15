@@ -24,13 +24,20 @@ internal object Storage {
             cooldownMaxDays = o.optInt("cooldownMaxDays", d.cooldownMaxDays),
             reachedMode = enumOr(o.optString("reachedMode"), d.reachedMode),
             notYetMode = enumOr(o.optString("notYetMode"), d.notYetMode),
-            message = o.optString("message", d.message).ifBlank { d.message },
+            message = readMessage(o, d),
             spinSound = o.optBoolean("spinSound", d.spinSound),
             spinVibration = o.optBoolean("spinVibration", d.spinVibration),
             reduceMotion = o.optBoolean("reduceMotion", d.reduceMotion),
             remindersOn = o.optBoolean("remindersOn", d.remindersOn),
-            reminderFrequency = enumOr(o.optString("reminderFrequency"), d.reminderFrequency),
+            reminderFrequency = readFrequency(o, d),
             reminderDay = enumOr(o.optString("reminderDay"), d.reminderDay),
+            // Older versions had one weekly day: start the multi-day choice from it.
+            reminderDays = strings(o.optJSONArray("reminderDays"))
+                .mapNotNull { runCatching { java.time.DayOfWeek.valueOf(it) }.getOrNull() }.toSet()
+                .ifEmpty { setOf(enumOr(o.optString("reminderDay"), d.reminderDay)) },
+            reminderDayOfMonth = o.optInt("reminderDayOfMonth", d.reminderDayOfMonth).coerceIn(0, 31),
+            reminderMonths = strings(o.optJSONArray("reminderMonths"))
+                .mapNotNull { runCatching { java.time.Month.valueOf(it) }.getOrNull() }.toSet(),
             windowStartMin = o.optInt("windowStartMin", d.windowStartMin),
             windowEndMin = o.optInt("windowEndMin", d.windowEndMin),
             lastReminderAt = if (o.has("lastReminderAt")) o.getLong("lastReminderAt") else null,
@@ -41,10 +48,30 @@ internal object Storage {
             askedNotificationPermission = o.optBoolean("askedNotificationPermission", d.askedNotificationPermission),
             themeMode = enumOr(o.optString("themeMode"), d.themeMode),
             textScale = o.optDouble("textScale", d.textScale.toDouble()).toFloat(),
+            palette = enumOr(o.optString("palette"), d.palette),
             customMessages = strings(o.optJSONArray("customMessages")),
             pictureSource = enumOr(o.optString("pictureSource"), d.pictureSource),
             wheelPhotos = strings(o.optJSONArray("wheelPhotos")),
         )
+    }
+
+    /** Old app versions saved their default message automatically. Settings saved before then switch to Blank. */
+    private const val MESSAGES_VERSION = 2
+    private val OLD_DEFAULT_MESSAGES = setOf("Thinking about you", "Hey! It's been a while. How are you doing?")
+
+    private fun readMessage(o: JSONObject, d: Settings): String {
+        val stored = if (o.has("message")) o.optString("message") else return d.message // "" = Blank preset
+        val old = o.optInt("messagesVersion", 1) < MESSAGES_VERSION
+        return if (old && stored in OLD_DEFAULT_MESSAGES) Settings.BLANK_MESSAGE else stored
+    }
+
+    /** Old app versions saved Weekly automatically as the default. Settings saved before the switch to Daily move to Daily once. */
+    private const val REMINDERS_VERSION = 2
+
+    private fun readFrequency(o: JSONObject, d: Settings): ReminderFrequency {
+        val stored = enumOr(o.optString("reminderFrequency"), d.reminderFrequency)
+        val old = o.has("reminderFrequency") && o.optInt("remindersVersion", 1) < REMINDERS_VERSION
+        return if (old && stored == ReminderFrequency.WEEKLY) ReminderFrequency.DAILY else stored
     }
 
     fun writeSettings(file: File, s: Settings) {
@@ -58,18 +85,24 @@ internal object Storage {
             .put("reachedMode", s.reachedMode.name)
             .put("notYetMode", s.notYetMode.name)
             .put("message", s.message)
+            .put("messagesVersion", MESSAGES_VERSION)
             .put("spinSound", s.spinSound)
             .put("spinVibration", s.spinVibration)
             .put("reduceMotion", s.reduceMotion)
             .put("remindersOn", s.remindersOn)
             .put("reminderFrequency", s.reminderFrequency.name)
+            .put("remindersVersion", REMINDERS_VERSION)
             .put("reminderDay", s.reminderDay.name)
+            .put("reminderDays", JSONArray(s.reminderDays.sortedBy { it.value }.map { it.name }))
+            .put("reminderMonths", JSONArray(s.reminderMonths.sortedBy { it.value }.map { it.name }))
+            .put("reminderDayOfMonth", s.reminderDayOfMonth)
             .put("windowStartMin", s.windowStartMin)
             .put("windowEndMin", s.windowEndMin)
             .put("snoozes", JSONObject().apply { s.snoozes.forEach { (id, at) -> put(id, at) } })
             .put("askedNotificationPermission", s.askedNotificationPermission)
             .put("themeMode", s.themeMode.name)
             .put("textScale", s.textScale.toDouble())
+            .put("palette", s.palette.name)
             .put("customMessages", JSONArray(s.customMessages))
             .put("pictureSource", s.pictureSource.name)
             .put("wheelPhotos", JSONArray(s.wheelPhotos))
@@ -90,6 +123,8 @@ internal object Storage {
         }
         state.batch = o.optJSONObject("batch")?.let(::batchFromJson)
         state.currentPick = if (o.has("currentPick")) o.getString("currentPick") else null
+        state.pickSnoozed = state.currentPick != null && o.optBoolean("pickSnoozed", false)
+        state.reswipe += strings(o.optJSONArray("reswipe"))
         return state
     }
 
@@ -98,6 +133,8 @@ internal object Storage {
             .put("records", JSONArray(state.records.values.map(::recordToJson)))
         state.batch?.let { o.put("batch", batchToJson(it)) }
         state.currentPick?.let { o.put("currentPick", it) }
+        if (state.pickSnoozed) o.put("pickSnoozed", true)
+        if (state.reswipe.isNotEmpty()) o.put("reswipe", JSONArray(state.reswipe.toList()))
         writeJson(file, o)
     }
 
@@ -165,6 +202,7 @@ internal object Storage {
             .put("drawnAt", b.drawnAt)
             .put("slots", slots)
             .put("retired", JSONArray(b.retired.toList()))
+            .put("skipped", JSONArray(b.skipped.toList()))
     }
 
     private fun batchFromJson(o: JSONObject): WheelBatch? = runCatching {
@@ -177,6 +215,7 @@ internal object Storage {
                 Slot(s.getString("id"), enumOr(s.optString("state"), SlotState.ACTIVE))
             },
             retired = (0 until retired.length()).map { retired.getString(it) }.toSet(),
+            skipped = strings(o.optJSONArray("skipped")).toSet(),
         )
     }.getOrNull()
 

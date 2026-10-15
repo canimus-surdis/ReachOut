@@ -87,7 +87,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -103,6 +102,8 @@ import kotlin.random.Random
 fun WheelScreen(
     repo: ReachOutRepository,
     dataVersion: Int,
+    /** Goes up each time the app is opened; the picked person's box opens again then. */
+    openCount: Int,
     onAddPeople: () -> Unit,
     onOpenMenu: () -> Unit,
     modifier: Modifier = Modifier,
@@ -128,10 +129,25 @@ fun WheelScreen(
 
     val rotation = remember { Animatable(0f) }
     val wheelAlpha = remember { Animatable(1f) }
-    // The picked person stays in the box (saved, even across restarts) until you act on them.
+    // The picked person stays picked (saved, even across restarts) until you Call, Text, Share
+    // or put them back in the pool. Their box opens whenever the app is opened.
+    // Snooze can be used once per spin: it closes the box for now, and the box comes back
+    // (with Snooze greyed out) the next time the app is opened or the reminder is tapped.
+    var pickSnoozed by remember { mutableStateOf(repo.isPickSnoozed()) }
     var result by remember { mutableStateOf(repo.currentPick()) }
     var resultLook by remember { mutableStateOf(AccessoryLook.random()) }
     var showSnooze by remember { mutableStateOf(false) }
+
+    // Every time the app is opened: show the picked person's box.
+    LaunchedEffect(openCount) {
+        pickSnoozed = repo.isPickSnoozed()
+        if (result == null) {
+            repo.currentPick()?.let {
+                resultLook = AccessoryLook.random(avoid = resultLook.accessory)
+                result = it
+            }
+        }
+    }
 
     LaunchedEffect(openRequest) {
         val id = openRequest?.contactId ?: return@LaunchedEffect
@@ -139,8 +155,12 @@ fun WheelScreen(
             resultLook = AccessoryLook.random(avoid = resultLook.accessory)
             result = it
             repo.setCurrentPick(it.id)
+            pickSnoozed = repo.isPickSnoozed()
         }
     }
+
+    /** Just snoozed (box closed for now): the wheel waits for this person. */
+    val waitingFor = if (result == null && pickSnoozed) repo.currentPick() else null
 
     // Ask once for notification permission, the first time you reach the wheel with reminders on.
     var notifyAfterGrant by remember { mutableStateOf<String?>(null) }
@@ -153,9 +173,10 @@ fun WheelScreen(
         if (pending != null) {
             if (granted) {
                 val at = Reminders.snoozeOneHour(context, pending)
-                repo.setCurrentPick(null)
+                repo.snoozeCurrentPick()
+                pickSnoozed = true
                 result = null
-                Toast.makeText(context, "I'll remind you ${timeLabel(at)}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "I'll remind you ${timeLabel(at, repo.now())}", Toast.LENGTH_SHORT).show()
             } else {
                 // No notifications means no reminder: keep the box so you can choose something else.
                 Toast.makeText(context, "Notifications are off, so I can't remind you. Pick another option.", Toast.LENGTH_LONG).show()
@@ -187,7 +208,7 @@ fun WheelScreen(
     DisposableEffect(Unit) { onDispose { tone?.release() } }
 
     fun spin() {
-        if (spinning || result != null || activeIndexes.isEmpty()) return
+        if (spinning || result != null || waitingFor != null || activeIndexes.isEmpty()) return
         spinning = true
         val count = slots.size
         val target = activeIndexes.random()
@@ -361,6 +382,7 @@ fun WheelScreen(
                             result = null
                         },
                         onSnooze = { showSnooze = true },
+                        canSnooze = !pickSnoozed,
                     )
                 }
             }
@@ -387,8 +409,24 @@ fun WheelScreen(
             }
         }
 
+        // Just snoozed: a short note instead of the Spin button. The box opens again next time.
+        if (waitingFor != null) {
+            val at = settings.snoozes[waitingFor.id]
+            Text(
+                "${waitingFor.name} is snoozed" +
+                    (if (at != null) " until ${timeLabel(at, repo.now()).removePrefix("at ")}" else "") +
+                    ". Their box opens again next time you open the app. Spinning is paused until you reach out.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+            )
+        }
+
         // Bottom controls
-        if (slots.isNotEmpty() && activeIndexes.isNotEmpty() && result == null) {
+        if (slots.isNotEmpty() && activeIndexes.isNotEmpty() && result == null && waitingFor == null) {
             Button(
                 onClick = { spin() },
                 enabled = !spinning,
@@ -410,12 +448,13 @@ fun WheelScreen(
 
     // While someone is picked, Back doesn't dismiss the box.
     BackHandler(enabled = result != null) {
-        Toast.makeText(context, "Choose Call, Text, Share or Snooze first.", Toast.LENGTH_SHORT).show()
+        val choices = if (pickSnoozed) "Call, Text or Share" else "Call, Text, Share or Snooze"
+        Toast.makeText(context, "Choose $choices first.", Toast.LENGTH_SHORT).show()
     }
 
     // Snooze choices
     val snoozed = result
-    if (showSnooze && snoozed != null) {
+    if (showSnooze && snoozed != null && !pickSnoozed) {
         AlertDialog(
             onDismissRequest = { showSnooze = false },
             title = { Text("Snooze ${snoozed.name}?") },
@@ -426,9 +465,10 @@ fun WheelScreen(
                             showSnooze = false
                             if (Reminders.notificationsAllowed(context)) {
                                 val at = Reminders.snoozeOneHour(context, snoozed.id)
-                                repo.setCurrentPick(null)
+                                repo.snoozeCurrentPick()
+                                pickSnoozed = true
                                 result = null
-                                Toast.makeText(context, "I'll remind you ${timeLabel(at)}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "I'll remind you ${timeLabel(at, repo.now())}", Toast.LENGTH_SHORT).show()
                             } else {
                                 notifyAfterGrant = snoozed.id
                                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -461,6 +501,7 @@ private fun ResultBox(
     onText: () -> Unit,
     onShare: () -> Unit,
     onSnooze: () -> Unit,
+    canSnooze: Boolean = true,
 ) {
     val hasNumber = contact.mainNumber != null
     Card(
@@ -500,7 +541,16 @@ private fun ResultBox(
                 ActionButton("📞", "Call", hasNumber, onCall, Modifier.weight(1f))
                 ActionButton("💬", "Text", hasNumber, onText, Modifier.weight(1f))
                 ActionButton("↗️", "Share", true, onShare, Modifier.weight(1f))
-                ActionButton("⏰", "Snooze", true, onSnooze, Modifier.weight(1f))
+                ActionButton("⏰", "Snooze", canSnooze, onSnooze, Modifier.weight(1f))
+            }
+            if (!canSnooze) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Snooze already used for this pick.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
             }
             if (!hasNumber) {
                 Spacer(Modifier.height(8.dp))
@@ -553,11 +603,11 @@ private fun EmptyWheel(hasPeople: Boolean, onAddPeople: () -> Unit) {
 }
 
 /** "at 6:15 PM" today, or "tomorrow at 5:00 PM". */
-private fun timeLabel(ms: Long): String {
+private fun timeLabel(ms: Long, now: Long = System.currentTimeMillis()): String {
     val zone = ZoneId.systemDefault()
     val t = Instant.ofEpochMilli(ms).atZone(zone)
     val time = t.format(DateTimeFormatter.ofPattern("h:mm a"))
-    val days = t.toLocalDate().toEpochDay() - LocalDate.now(zone).toEpochDay()
+    val days = t.toLocalDate().toEpochDay() - Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toEpochDay()
     return when (days) {
         0L -> "at $time"
         1L -> "tomorrow at $time"
@@ -575,14 +625,13 @@ private fun openDialer(context: Context, number: String?) {
 private fun openTexting(context: Context, number: String?, message: String) {
     if (number == null) return
     val intent = Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null))
-        .putExtra("sms_body", message)
+    if (message.isNotBlank()) intent.putExtra("sms_body", message) // Blank preset: nothing pre-filled
     startOtherApp(context, intent)
 }
 
 private fun openShare(context: Context, name: String, message: String) {
-    val send = Intent(Intent.ACTION_SEND)
-        .setType("text/plain")
-        .putExtra(Intent.EXTRA_TEXT, message)
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+    if (message.isNotBlank()) send.putExtra(Intent.EXTRA_TEXT, message) // Blank preset: nothing pre-filled
     startOtherApp(context, Intent.createChooser(send, "Reach out to $name"))
 }
 

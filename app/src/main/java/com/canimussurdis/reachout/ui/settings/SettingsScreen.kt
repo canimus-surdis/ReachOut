@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -80,14 +81,24 @@ import com.canimussurdis.reachout.data.ReminderFrequency
 import com.canimussurdis.reachout.data.Schedule
 import com.canimussurdis.reachout.data.Settings
 import com.canimussurdis.reachout.data.Snapshot
+import com.canimussurdis.reachout.data.Status
 import com.canimussurdis.reachout.data.VCard
 import com.canimussurdis.reachout.data.ThemeMode
 import com.canimussurdis.reachout.data.WheelPhotos
 import com.canimussurdis.reachout.reminders.Reminders
+import com.canimussurdis.reachout.ui.theme.paletteSwatches
+import com.canimussurdis.reachout.data.ColorPalette
+import androidx.compose.ui.graphics.luminance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
+import java.time.Month
+import java.time.LocalDate
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
@@ -101,6 +112,7 @@ private enum class Page(val title: String) {
     IMPORT("Import contacts"),
     PICK("Choose people"),
     BREAKS("Custom break lengths"),
+    IGNORE("Ignore contacts"),
     WHEEL("Wheel"),
     REMINDERS("Reminders"),
     MESSAGES("Messages"),
@@ -131,6 +143,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     /** Open straight to Import contacts (from the wheel's "Add more people" when nobody's left to swipe). */
     startAtImport: Boolean = false,
+    /** Import contacts: swipe on the people you picked (instead of adding them straight to your list). */
+    onSwipePeople: (List<Contact>) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -160,6 +174,7 @@ fun SettingsScreen(
             Page.MAIN -> onBack()
             Page.PICK -> page = Page.IMPORT
             Page.BREAKS -> page = Page.CONTACTS
+            Page.IGNORE -> page = Page.CONTACTS
             Page.IMPORT -> page = Page.CONTACTS
             Page.GUIDE -> page = Page.MAIN
             else -> {
@@ -277,6 +292,24 @@ fun SettingsScreen(
     var breakMax by remember { mutableIntStateOf(s.cooldownMaxDays) }
     var breakQuery by rememberSaveable { mutableStateOf("") }
 
+    // ---- Ignore contacts ----
+    var ignoreSelected by remember { mutableStateOf(setOf<String>()) }
+    var ignoreQuery by rememberSaveable { mutableStateOf("") }
+    // Everyone in your contacts (or the demo list) who isn't ignored yet, with what they are now.
+    val ignoreCandidates by produceState<List<Contact>?>(null, page, version) {
+        if (page == Page.IGNORE) {
+            value = withContext(Dispatchers.IO) {
+                val ignored = snap.ignored.map { it.id }.toSet()
+                repo.loadAllContacts().filter { it.id !in ignored }.sortedBy { it.name.lowercase() }
+            }
+        }
+    }
+    fun openIgnore() {
+        ignoreSelected = emptySet()
+        ignoreQuery = ""
+        page = Page.IGNORE
+    }
+
     // ---- How-to guide ----
     var guideOpen by remember { mutableStateOf(setOf<Int>()) }
     var guideQuery by rememberSaveable { mutableStateOf("") }
@@ -303,6 +336,8 @@ fun SettingsScreen(
             openPick()
         } else if (next == "all") {
             confirmAddAll = true
+        } else if (next == "ignore") {
+            openIgnore()
         }
     }
     fun withContacts(next: String) {
@@ -380,6 +415,32 @@ fun SettingsScreen(
                     onBringBack = { repo.endCooldown(it); changed() },
                     onRemove = { repo.removeAccepted(it); changed() },
                     onRestore = { repo.restoreRejected(it); changed() },
+                    onIgnoreContacts = {
+                        if (canRead) {
+                            openIgnore()
+                        } else {
+                            withContacts("ignore")
+                        }
+                    },
+                    onUnignore = { repo.unignore(it); changed() },
+                )
+                Page.IGNORE -> ignorePage(
+                    candidates = ignoreCandidates,
+                    statuses = repo.statuses(),
+                    query = ignoreQuery,
+                    onQuery = { ignoreQuery = it },
+                    selected = ignoreSelected,
+                    onToggle = { id -> ignoreSelected = if (id in ignoreSelected) ignoreSelected - id else ignoreSelected + id },
+                    onSelectAll = { ids -> ignoreSelected = ignoreSelected + ids },
+                    onClear = { ignoreSelected = emptySet() },
+                    onIgnore = {
+                        val chosen = ignoreCandidates.orEmpty().filter { it.id in ignoreSelected }
+                        repo.ignore(chosen)
+                        toast(if (chosen.size == 1) "Ignored 1 person." else "Ignored ${chosen.size} people.")
+                        ignoreSelected = emptySet()
+                        changed()
+                        page = Page.CONTACTS
+                    },
                 )
                 Page.BREAKS -> breaksPage(
                     snap = snap,
@@ -439,16 +500,10 @@ fun SettingsScreen(
                     onClear = { selected = emptySet() },
                     onAdd = {
                         val chosen = (fileCandidates ?: deck).orEmpty().filter { it.id in selected }
-                        val added = repo.acceptMany(chosen)
-                        toast(if (added == 1) "Added 1 person." else "Added $added people.")
                         selected = emptySet()
                         fileCandidates = null
-                        changed()
-                        if (startAtImport) {
-                            onBack()
-                        } else {
-                            page = Page.CONTACTS
-                        }
+                        page = Page.IMPORT
+                        onSwipePeople(chosen)
                     },
                 )
                 Page.WHEEL -> wheelPage(
@@ -474,7 +529,7 @@ fun SettingsScreen(
                             val removed = it.customMessages[i]
                             it.copy(
                                 customMessages = it.customMessages.filterIndexed { k, _ -> k != i },
-                                message = if (it.message == removed) Settings.BUILT_IN_MESSAGES.first() else it.message,
+                                message = if (it.message == removed) Settings.DEFAULT_MESSAGE else it.message,
                             )
                         }
                     },
@@ -544,14 +599,14 @@ fun SettingsScreen(
         val everyone = deck.orEmpty()
         AlertDialog(
             onDismissRequest = { confirmAddAll = false },
-            title = { Text("Add everyone?") },
+            title = { Text("Swipe through everyone?") },
             text = {
                 Text(
                     when {
                         deck == null -> "Counting the people you haven't swiped on…"
                         everyone.isEmpty() -> "You've already swiped on everyone in your phone."
-                        else -> "This adds all ${everyone.size} people you haven't swiped on to your list. " +
-                            "You can remove anyone later in Settings → Contacts."
+                        else -> "Shows all ${everyone.size} people you haven't swiped on as swipe cards, " +
+                            "so you can keep or pass on each one."
                     }
                 )
             },
@@ -560,16 +615,9 @@ fun SettingsScreen(
                     enabled = everyone.isNotEmpty(),
                     onClick = {
                         confirmAddAll = false
-                        val added = repo.acceptMany(everyone)
-                        toast(if (added == 1) "Added 1 person." else "Added $added people.")
-                        changed()
-                        if (startAtImport) {
-                            onBack()
-                        } else {
-                            page = Page.CONTACTS
-                        }
+                        onSwipePeople(everyone)
                     },
-                ) { Text("Add everyone") }
+                ) { Text("Start swiping") }
             },
             dismissButton = { TextButton(onClick = { confirmAddAll = false }) { Text("Cancel") } },
         )
@@ -635,10 +683,10 @@ private fun LazyListScope.mainPage(s: Settings, snap: Snapshot, onShowTour: () -
                 "Reminders",
                 if (s.remindersOn) "${s.reminderFrequency.label} · ${clock(s.windowStartMin)}–${clock(s.windowEndMin)}" else "Off",
             ) { open(Page.REMINDERS) }
-            NavRow("Messages", "\"${s.message}\"") { open(Page.MESSAGES) }
+            NavRow("Messages", if (s.message.isBlank()) Settings.messageLabel(s.message) else "\"${s.message}\"") { open(Page.MESSAGES) }
             NavRow(
                 "Display",
-                "${s.themeMode.label} · ${TEXT_SCALE_LABELS[nearestIndex(TEXT_SCALES, s.textScale)]} text",
+                "${s.palette.label} · ${s.themeMode.label} · ${TEXT_SCALE_LABELS[nearestIndex(TEXT_SCALES, s.textScale)]} text",
             ) { open(Page.DISPLAY) }
             NavRow("Backup & restore", "Save your list and settings to a file") { open(Page.BACKUP) }
             NavRow("Demo mode & testing", if (s.demoMode) "Demo mode is on" else "Off") { open(Page.DEMO) }
@@ -662,9 +710,14 @@ private fun LazyListScope.contactsPage(
     onBringBack: (String) -> Unit,
     onRemove: (String) -> Unit,
     onRestore: (String) -> Unit,
+    onIgnoreContacts: () -> Unit,
+    onUnignore: (String) -> Unit,
 ) {
     item {
         Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text("+ Import contacts") }
+    }
+    item {
+        OutlinedButton(onClick = onIgnoreContacts, modifier = Modifier.fillMaxWidth()) { Text("Ignore contacts") }
     }
     item {
         OutlinedButton(onClick = onCustomBreaks, modifier = Modifier.fillMaxWidth()) {
@@ -679,7 +732,7 @@ private fun LazyListScope.contactsPage(
     }
 
     item { Header("On your list (${snap.accepted.size})") }
-    item { Note("Removing someone puts them back in the swipe deck.") }
+    item { Note("Removing someone sends them back to swiping: you'll see them the next time you open the app.") }
     items(snap.accepted, key = { "ac-" + it.id }) { c ->
         val custom = snap.customBreaks[c.id]
         PersonRow(c.name, custom?.let { "Break: ${breakRange(it.first, it.second)}" }, "Remove") { onRemove(c.id) }
@@ -689,6 +742,76 @@ private fun LazyListScope.contactsPage(
     if (snap.rejected.isEmpty()) item { Note("Nobody yet.") }
     items(snap.rejected, key = { "rj-" + it.id }) { c ->
         PersonRow(c.name, null, "Restore") { onRestore(c.id) }
+    }
+
+    item { Header("Ignored (${snap.ignored.size})") }
+    item { Note("Ignored people never show up as swipe cards or in imports. Un-ignore to swipe on them again.") }
+    if (snap.ignored.isEmpty()) item { Note("Nobody yet.") }
+    items(snap.ignored, key = { "ig-" + it.id }) { c ->
+        PersonRow(c.name, null, "Un-ignore") { onUnignore(c.id) }
+    }
+}
+
+private fun LazyListScope.ignorePage(
+    candidates: List<Contact>?,
+    statuses: Map<String, Status>,
+    query: String,
+    onQuery: (String) -> Unit,
+    selected: Set<String>,
+    onToggle: (String) -> Unit,
+    onSelectAll: (List<String>) -> Unit,
+    onClear: () -> Unit,
+    onIgnore: () -> Unit,
+) {
+    item {
+        Note(
+            "Tick people you never want to see as swipe cards, such as businesses or old numbers. " +
+                "Anyone on your list comes off it. Un-ignore them any time on the Contacts page."
+        )
+    }
+    item {
+        Button(onClick = onIgnore, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Text(
+                when (selected.size) {
+                    0 -> "Choose people to ignore"
+                    1 -> "Ignore 1 person"
+                    else -> "Ignore ${selected.size} people"
+                }
+            )
+        }
+    }
+    item {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            label = { Text("Search") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    if (candidates == null) {
+        item { Note("Loading…") }
+        return
+    }
+    val shown = if (query.isBlank()) candidates else candidates.filter { it.name.contains(query.trim(), ignoreCase = true) }
+    if (shown.isEmpty()) {
+        item { Note(if (candidates.isEmpty()) "Nobody left to ignore." else "No matches.") }
+        return
+    }
+    item {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = { onSelectAll(shown.map { it.id }) }) { Text("Select all (${shown.size})") }
+            TextButton(onClick = onClear) { Text("Clear") }
+        }
+    }
+    items(shown, key = { "ign-" + it.id }) { c ->
+        val now = when (statuses[c.id]) {
+            Status.ACCEPTED -> "On your list"
+            Status.REJECTED -> "Passed"
+            else -> null
+        }
+        val detail = listOfNotNull(now, c.mainNumber).joinToString(" · ").ifBlank { null }
+        CheckRow(c.name, detail, checked = c.id in selected) { onToggle(c.id) }
     }
 }
 
@@ -797,14 +920,14 @@ private fun LazyListScope.importPage(
     }
     item {
         Group {
-            NavRow("Pick several at once", "Tick people from your phone's contacts") { onPick() }
+            NavRow("Pick several at once", "Tick people from your phone's contacts, then swipe on them") { onPick() }
             NavRow(
                 "Add everyone",
                 when {
-                    !canRead -> "Adds everyone from your phone you haven't swiped on"
+                    !canRead -> "Swipe on everyone from your phone you haven't swiped on yet"
                     newCount == null -> "Counting…"
-                    newCount == 1 -> "Adds the 1 person you haven't swiped on"
-                    else -> "Adds all $newCount people you haven't swiped on"
+                    newCount == 1 -> "Swipe on the 1 person you haven't swiped on yet"
+                    else -> "Swipe on all $newCount people you haven't swiped on yet"
                 },
             ) { onAddAll() }
             NavRow("From a contacts file (.vcf)", "Exported from Google Contacts, iCloud, Outlook and others") { onFile() }
@@ -831,17 +954,17 @@ private fun LazyListScope.pickPage(
 ) {
     item {
         Note(
-            if (fromFile) "Found ${candidates?.size ?: 0} new people in the file. Untick anyone you don't want."
-            else "Tick everyone you'd like to add."
+            if (fromFile) "Found ${candidates?.size ?: 0} new people in the file. Untick anyone you don't want to swipe on."
+            else "Tick the people you'd like to swipe on. You'll keep or pass on each one next."
         )
     }
     item {
         Button(onClick = onAdd, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
             Text(
                 when (selected.size) {
-                    0 -> "Choose people to add"
-                    1 -> "Add 1 person"
-                    else -> "Add ${selected.size} people"
+                    0 -> "Choose people"
+                    1 -> "Swipe on 1 person"
+                    else -> "Swipe on ${selected.size} people"
                 }
             )
         }
@@ -936,6 +1059,10 @@ private fun LazyListScope.wheelPage(
             Choices(listOf("Back to pool", "Keep on wheel"), selected = s.notYetMode.ordinal, perRow = 2) { i ->
                 update { it.copy(notYetMode = NotYetMode.entries[i]) }
             }
+            Note(
+                if (s.notYetMode == NotYetMode.NEXT_WEEK) "Off this week's wheel; back in the pool from the next batch day."
+                else "They stay on this week's wheel."
+            )
         }
     }
     item {
@@ -981,18 +1108,72 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
     item {
         Group("How often") {
             Choices(ReminderFrequency.entries.map { it.label }, selected = s.reminderFrequency.ordinal, perRow = 3) { i ->
-                update { it.copy(reminderFrequency = ReminderFrequency.entries[i]) }
+                update {
+                    val f = ReminderFrequency.entries[i]
+                    // Yearly needs at least one month: start with this month.
+                    val months = if (f == ReminderFrequency.YEARLY && it.reminderMonths.isEmpty()) {
+                        setOf(LocalDate.now().month)
+                    } else {
+                        it.reminderMonths
+                    }
+                    // Monthly needs a date: start with today's.
+                    val dom = if (f == ReminderFrequency.MONTHLY && it.reminderDayOfMonth == 0) {
+                        LocalDate.now().dayOfMonth
+                    } else {
+                        it.reminderDayOfMonth
+                    }
+                    it.copy(reminderFrequency = f, reminderMonths = months, reminderDayOfMonth = dom)
+                }
             }
         }
     }
-    if (s.reminderFrequency != ReminderFrequency.DAILY) {
-        item {
-            Group("On") {
-                Choices(
-                    DayOfWeek.entries.map { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) },
-                    selected = s.reminderDay.ordinal,
+    val dayLabels = DayOfWeek.entries.map { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) }
+    when (s.reminderFrequency) {
+        ReminderFrequency.DAILY -> Unit
+        ReminderFrequency.WEEKLY, ReminderFrequency.BIWEEKLY -> item {
+            Group("On these days") {
+                MultiChoices(
+                    dayLabels,
+                    selected = s.reminderDays.map { it.ordinal }.toSet(),
                     perRow = 4,
-                ) { i -> update { it.copy(reminderDay = DayOfWeek.entries[i]) } }
+                ) { i ->
+                    update {
+                        val day = DayOfWeek.entries[i]
+                        val days = if (day in it.reminderDays) it.reminderDays - day else it.reminderDays + day
+                        if (days.isEmpty()) it else it.copy(reminderDays = days) // keep at least one day
+                    }
+                }
+                Note(
+                    (if (s.reminderFrequency == ReminderFrequency.WEEKLY) "Every week" else "Every other week") +
+                        ", on each day you pick. Tap a day to add or remove it."
+                )
+            }
+        }
+        ReminderFrequency.MONTHLY -> item { MonthlyDate(s, update) }
+        ReminderFrequency.YEARLY -> {
+            item {
+                Group("In these months") {
+                    MultiChoices(
+                        Month.entries.map { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) },
+                        selected = s.reminderMonths.map { it.ordinal }.toSet(),
+                        perRow = 4,
+                    ) { i ->
+                        update {
+                            val month = Month.entries[i]
+                            val months = if (month in it.reminderMonths) it.reminderMonths - month else it.reminderMonths + month
+                            if (months.isEmpty()) it else it.copy(reminderMonths = months) // keep at least one month
+                        }
+                    }
+                    Note("Once in each month you pick. Tap a month to add or remove it.")
+                }
+            }
+            item {
+                Group("On") {
+                    Choices(dayLabels, selected = s.reminderDay.ordinal, perRow = 4) { i ->
+                        update { it.copy(reminderDay = DayOfWeek.entries[i]) }
+                    }
+                    Note("The first ${s.reminderDay.getDisplayName(TextStyle.FULL, Locale.getDefault())} of each month you pick.")
+                }
             }
         }
     }
@@ -1023,7 +1204,7 @@ private fun LazyListScope.messagesPage(
     item { Note("Your chosen message pre-fills Text and Share. Tap one to choose it.") }
     item {
         Group("Messages") {
-            Settings.BUILT_IN_MESSAGES.forEach { m -> SelectRow(m, s.message == m) { onSelect(m) } }
+            Settings.BUILT_IN_MESSAGES.forEach { m -> SelectRow(Settings.messageLabel(m), s.message == m) { onSelect(m) } }
         }
     }
     item {
@@ -1046,6 +1227,13 @@ private fun LazyListScope.displayPage(s: Settings, update: ((Settings) -> Settin
         Group("Theme") {
             Choices(ThemeMode.entries.map { it.label }, selected = s.themeMode.ordinal, perRow = 3) { i ->
                 update { it.copy(themeMode = ThemeMode.entries[i]) }
+            }
+        }
+    }
+    item {
+        Group("Color palette") {
+            ColorPalette.entries.forEach { p ->
+                PaletteRow(p, selected = s.palette == p) { update { it.copy(palette = p) } }
             }
         }
     }
@@ -1262,6 +1450,40 @@ private fun Choices(options: List<String>, selected: Int, perRow: Int, onSelect:
     }
 }
 
+/** Like [Choices], but any number can be picked. Picked ones are filled in and ticked. */
+@Composable
+private fun MultiChoices(options: List<String>, selected: Set<Int>, perRow: Int, onToggle: (Int) -> Unit) {
+    val fontScale = LocalDensity.current.fontScale
+    val columns = when {
+        fontScale >= 1.25f -> minOf(perRow, 2)
+        fontScale >= 1.1f -> minOf(perRow, 3)
+        else -> perRow
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.withIndex().chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                row.forEach { (i, label) ->
+                    val pad = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+                    val buttonModifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .semantics { stateDescription = if (i in selected) "Selected" else "Not selected" }
+                    if (i in selected) {
+                        Button(onClick = { onToggle(i) }, modifier = buttonModifier, contentPadding = pad) {
+                            Text("✓ $label", textAlign = TextAlign.Center)
+                        }
+                    } else {
+                        OutlinedButton(onClick = { onToggle(i) }, modifier = buttonModifier, contentPadding = pad) {
+                            Text(label, textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun Stepper(
     title: String,
@@ -1339,6 +1561,46 @@ private fun PersonRow(name: String, detail: String?, action: String, onAction: (
             }
             TextButton(onClick = onAction) { Text(action) }
         }
+    }
+}
+
+/** One palette choice: three color dots, the name and a short description. */
+@Composable
+private fun PaletteRow(palette: ColorPalette, selected: Boolean, onClick: () -> Unit) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface)
+            .clickable(onClickLabel = "Use the ${palette.label} palette", onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            paletteSwatches(palette, dark).forEach { c ->
+                Box(
+                    Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(c)
+                        .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                )
+            }
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+        ) {
+            Text(palette.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                palette.blurb,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1490,6 +1752,71 @@ private fun DemoClock(now: Long, onTravel: (Long) -> Unit) {
             dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** Monthly: the date each month, as a field. Tap it to type a day from 1 to 31. */
+@Composable
+private fun MonthlyDate(s: Settings, update: ((Settings) -> Settings) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    val day = s.reminderDayOfMonth.takeIf { it in 1..31 } ?: LocalDate.now().dayOfMonth
+    Group("On this date") {
+        TimeField("Every month on the", ordinal(day), Modifier.fillMaxWidth()) { editing = true }
+        Note(
+            if (day > 28) "In months without a ${ordinal(day)}, the reminder comes on the last day of the month."
+            else "Tap the date to change it."
+        )
+    }
+    if (editing) {
+        var text by remember { mutableStateOf(day.toString()) }
+        val value = text.trim().toIntOrNull()
+        val valid = value != null && value in 1..31
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Day of the month") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { new -> text = new.filter { it.isDigit() }.take(2) },
+                        label = { Text("1 to 31") },
+                        singleLine = true,
+                        isError = !valid,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        if (valid) "Reminds you on the ${ordinal(value!!)} of every month."
+                        else "Type a day from 1 to 31.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (valid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = valid,
+                    onClick = {
+                        if (value != null) {
+                            update { it.copy(reminderDayOfMonth = value) }
+                        }
+                        editing = false
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** 1 → "1st", 2 → "2nd", 11 → "11th", 22 → "22nd". */
+private fun ordinal(n: Int): String {
+    val suffix = if (n % 100 in 11..13) "th" else when (n % 10) {
+        1 -> "st"
+        2 -> "nd"
+        3 -> "rd"
+        else -> "th"
+    }
+    return "$n$suffix"
 }
 
 /** Looks like a form field; tapping it opens the time editor. */
