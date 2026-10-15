@@ -1,0 +1,365 @@
+package com.canimussurdis.reachout.ui.swipe
+
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.canimussurdis.reachout.data.Contact
+import com.canimussurdis.reachout.data.ReachOutRepository
+import com.canimussurdis.reachout.ui.common.AccessoryLook
+import com.canimussurdis.reachout.ui.common.ContactCard
+import com.canimussurdis.reachout.ui.common.MenuButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
+
+private const val SWIPES_BEFORE_CONTINUE = 3
+
+/**
+ * Screen 1: one contact at a time, like a dating app.
+ * Swipe right to keep in touch, left to pass. "Continue" appears after 3 swipes.
+ */
+@Composable
+fun SwipeScreen(
+    repo: ReachOutRepository,
+    onContinue: () -> Unit,
+    onOpenMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** On app launch: if there's nobody new to swipe, go straight to the wheel. */
+    autoContinueWhenEmpty: Boolean = false,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+
+    var demoMode by remember { mutableStateOf(repo.settings.demoMode) }
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var askedOnce by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasPermission = granted
+        askedOnce = true
+    }
+    val canLoad = demoMode || hasPermission
+
+    // null = still loading
+    var deck by remember { mutableStateOf<List<Contact>?>(null) }
+    LaunchedEffect(canLoad, demoMode) {
+        deck = if (canLoad) {
+            withContext(Dispatchers.IO) { runCatching { repo.loadSwipeDeck() }.getOrDefault(emptyList()) }
+        } else {
+            emptyList()
+        }
+    }
+
+    // A fresh random accessory for each card shown, never the same as the card before it.
+    // (Plain holders, not Compose state, because they're filled in while drawing.)
+    val looks = remember { mutableMapOf<String, AccessoryLook>() }
+    val lastAccessory = remember { arrayOfNulls<Int>(1) }
+    fun lookFor(contact: Contact): AccessoryLook = looks.getOrPut(contact.id) {
+        AccessoryLook.random(avoid = lastAccessory[0]).also { lastAccessory[0] = it.accessory }
+    }
+
+    LaunchedEffect(deck) {
+        if (autoContinueWhenEmpty && canLoad && deck?.isEmpty() == true && repo.snapshot().accepted.isNotEmpty()) {
+            onContinue()
+        }
+    }
+
+    var swipes by rememberSaveable { mutableIntStateOf(0) }
+    var cardWidth by remember { mutableFloatStateOf(1000f) }
+    var busy by remember { mutableStateOf(false) }
+
+    fun commit(contact: Contact, keep: Boolean) {
+        if (keep) repo.accept(contact) else repo.reject(contact)
+        deck = deck?.drop(1)
+        swipes++
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+
+    /** Fly the card off-screen in the given direction, then record the swipe. */
+    suspend fun flyOff(contact: Contact, offset: Animatable<Float, AnimationVector1D>, keep: Boolean) {
+        if (busy) return
+        busy = true
+        offset.animateTo(if (keep) cardWidth * 1.5f else -cardWidth * 1.5f, tween(durationMillis = 200))
+        commit(contact, keep)
+        busy = false
+    }
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp),
+    ) {
+        // Top bar
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Reach Out",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            MenuButton(onClick = onOpenMenu)
+        }
+
+        // Card area
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val current = deck
+            when {
+                !canLoad -> PermissionCard(
+                    showSettingsHint = askedOnce,
+                    onAllow = { permissionLauncher.launch(Manifest.permission.READ_CONTACTS) },
+                    onTryDemo = {
+                        repo.setDemoMode(true)
+                        demoMode = true
+                    },
+                )
+
+                current == null -> CircularProgressIndicator()
+
+                current.isEmpty() -> MessageCard(
+                    title = "You've seen everyone",
+                    body = "Tap Continue to spin the wheel.",
+                )
+
+                else -> {
+                    val top = current.first()
+                    val next = current.getOrNull(1)
+                    val offset = remember(top.id) { Animatable(0f) }
+                    val progress = (offset.value / (cardWidth * 0.3f)).coerceIn(-1f, 1f)
+
+                    // The next card waits underneath and grows as you drag.
+                    if (next != null) {
+                        key(next.id) {
+                            ContactCard(
+                                next,
+                                lookFor(next),
+                                Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        val p = abs(progress)
+                                        scaleX = 0.94f + 0.06f * p
+                                        scaleY = 0.94f + 0.06f * p
+                                        alpha = 0.6f + 0.4f * p
+                                    },
+                            )
+                        }
+                    }
+
+                    key(top.id) {
+                        ContactCard(
+                            contact = top,
+                            look = lookFor(top),
+                            swipeProgress = progress,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .onSizeChanged { cardWidth = it.width.toFloat().coerceAtLeast(1f) }
+                                .graphicsLayer {
+                                    translationX = offset.value
+                                    rotationZ = offset.value / cardWidth * 12f
+                                }
+                                .semantics {
+                                    customActions = listOf(
+                                        CustomAccessibilityAction("Keep in touch") {
+                                            scope.launch { flyOff(top, offset, keep = true) }
+                                            true
+                                        },
+                                        CustomAccessibilityAction("Pass") {
+                                            scope.launch { flyOff(top, offset, keep = false) }
+                                            true
+                                        },
+                                    )
+                                }
+                                .pointerInput(top.id) {
+                                    detectHorizontalDragGestures(
+                                        onDragEnd = {
+                                            scope.launch {
+                                                val threshold = cardWidth * 0.3f
+                                                when {
+                                                    offset.value > threshold -> flyOff(top, offset, keep = true)
+                                                    offset.value < -threshold -> flyOff(top, offset, keep = false)
+                                                    else -> offset.animateTo(0f, spring())
+                                                }
+                                            }
+                                        },
+                                        onDragCancel = { scope.launch { offset.animateTo(0f, spring()) } },
+                                    ) { change, dragAmount ->
+                                        if (busy) return@detectHorizontalDragGestures
+                                        change.consume()
+                                        scope.launch { offset.snapTo(offset.value + dragAmount) }
+                                    }
+                                },
+                        )
+                    }
+                }
+            }
+        }
+
+        // Continue appears after 3 swipes (or right away when the deck is empty).
+        val deckEmpty = canLoad && deck?.isEmpty() == true
+        val showContinue = swipes >= SWIPES_BEFORE_CONTINUE || deckEmpty
+        AnimatedVisibility(
+            visible = showContinue,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Button(
+                onClick = onContinue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) {
+                Text("Continue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (!showContinue && canLoad && deck?.isNotEmpty() == true) {
+            Text(
+                "Swipe right to keep in touch · left to pass",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .padding(top = 18.dp),
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTryDemo: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "Let's find your people",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                "Reach Out reads your contacts to show them as cards. It can never change or delete them.",
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) { Text("Allow contacts access") }
+            TextButton(onClick = onTryDemo) { Text("Try with demo contacts instead") }
+            if (showSettingsHint) {
+                Text(
+                    "If nothing happens, allow Contacts in your phone's Settings → Apps → Reach Out → Permissions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageCard(title: String, body: String) {
+    Card(
+        Modifier.fillMaxSize(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(body, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
