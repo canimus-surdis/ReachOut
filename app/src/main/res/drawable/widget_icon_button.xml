@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round widget buttons (Call, Text): raised, lit from above. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:top="2dp">
+        <shape android:shape="oval">
+            <solid android:color="@color/widget_shadow" />
+        </shape>
+    </item>
+    <item android:bottom="2dp">
+        <shape android:shape="oval">
+            <gradient android:angle="270" android:startColor="@color/widget_primary_top" android:endColor="@color/widget_primary" />
+        </shape>
+    </item>
+</layer-list>

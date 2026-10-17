@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tells Android about the "Who's up" widget: a slim one-row strip, 3 cells wide by default. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_pick_description"
+    android:initialLayout="@layout/widget_pick"
+    android:minWidth="180dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="150dp"
+    android:minResizeHeight="40dp"
+    android:previewLayout="@layout/widget_pick"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="3"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

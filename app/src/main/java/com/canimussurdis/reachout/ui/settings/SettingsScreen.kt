@@ -1,5 +1,24 @@
 package com.canimussurdis.reachout.ui.settings
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import com.canimussurdis.reachout.ui.common.recessed
+import com.canimussurdis.reachout.ui.common.raised
+import com.canimussurdis.reachout.ui.common.Tone
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.canimussurdis.reachout.ui.common.CircleIconButton
+import com.canimussurdis.reachout.ui.common.AppIcons
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.BorderStroke
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -48,6 +67,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -73,6 +93,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.canimussurdis.reachout.data.Backup
 import com.canimussurdis.reachout.data.Contact
+import com.canimussurdis.reachout.data.KeepFrequency
+import com.canimussurdis.reachout.ui.common.FrequencyPicker
+import androidx.compose.ui.draw.rotate
 import com.canimussurdis.reachout.data.NotYetMode
 import com.canimussurdis.reachout.data.PictureSource
 import com.canimussurdis.reachout.data.ReachOutRepository
@@ -85,6 +108,7 @@ import com.canimussurdis.reachout.data.Status
 import com.canimussurdis.reachout.data.VCard
 import com.canimussurdis.reachout.data.ThemeMode
 import com.canimussurdis.reachout.data.WheelPhotos
+import com.canimussurdis.reachout.data.WheelStyle
 import com.canimussurdis.reachout.reminders.Reminders
 import com.canimussurdis.reachout.ui.theme.paletteSwatches
 import com.canimussurdis.reachout.data.ColorPalette
@@ -113,6 +137,7 @@ private enum class Page(val title: String) {
     PICK("Choose people"),
     BREAKS("Custom break lengths"),
     IGNORE("Ignore contacts"),
+    REMOVE("Remove from your list"),
     WHEEL("Wheel"),
     REMINDERS("Reminders"),
     MESSAGES("Messages"),
@@ -175,6 +200,7 @@ fun SettingsScreen(
             Page.PICK -> page = Page.IMPORT
             Page.BREAKS -> page = Page.CONTACTS
             Page.IGNORE -> page = Page.CONTACTS
+            Page.REMOVE -> page = Page.CONTACTS
             Page.IMPORT -> page = Page.CONTACTS
             Page.GUIDE -> page = Page.MAIN
             else -> {
@@ -292,9 +318,18 @@ fun SettingsScreen(
     var breakMax by remember { mutableIntStateOf(s.cooldownMaxDays) }
     var breakQuery by rememberSaveable { mutableStateOf("") }
 
+    // ---- Contacts → On your list: the row opened to change how often ----
+    var openRow by rememberSaveable { mutableStateOf<String?>(null) }
+
     // ---- Ignore contacts ----
     var ignoreSelected by remember { mutableStateOf(setOf<String>()) }
     var ignoreQuery by rememberSaveable { mutableStateOf("") }
+    var confirmIgnore by remember { mutableStateOf(false) }
+
+    // ---- Remove several ----
+    var removeSelected by remember { mutableStateOf(setOf<String>()) }
+    var removeQuery by rememberSaveable { mutableStateOf("") }
+    var confirmRemove by remember { mutableStateOf(false) }
     // Everyone in your contacts (or the demo list) who isn't ignored yet, with what they are now.
     val ignoreCandidates by produceState<List<Contact>?>(null, page, version) {
         if (page == Page.IGNORE) {
@@ -346,19 +381,15 @@ fun SettingsScreen(
     }
 
     Column(modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = { goBack() }) { Text("‹ Back") }
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)) {
+            CircleIconButton(AppIcons.Back, "Back", onClick = { goBack() })
             Text(
                 page.title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.headlineLarge,
                 color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp, top = 12.dp),
             )
         }
 
@@ -412,8 +443,20 @@ fun SettingsScreen(
                         breakQuery = ""
                         page = Page.BREAKS
                     },
+                    openRow = openRow,
+                    onToggleRow = { id -> openRow = if (openRow == id) null else id },
+                    onFrequency = { id, f ->
+                        repo.setCustomBreak(listOf(id), f.minDays, f.maxDays)
+                        changed()
+                    },
+                    defaultMin = s.cooldownMinDays,
+                    defaultMax = s.cooldownMaxDays,
+                    onCustomBreak = { id, min, max ->
+                        repo.setCustomBreak(listOf(id), min, max)
+                        changed()
+                    },
                     onBringBack = { repo.endCooldown(it); changed() },
-                    onRemove = { repo.removeAccepted(it); changed() },
+                    onRemove = { openRow = null; repo.removeAccepted(it); changed() },
                     onRestore = { repo.restoreRejected(it); changed() },
                     onIgnoreContacts = {
                         if (canRead) {
@@ -423,6 +466,21 @@ fun SettingsScreen(
                         }
                     },
                     onUnignore = { repo.unignore(it); changed() },
+                    onRemoveSeveral = {
+                        removeSelected = emptySet()
+                        removeQuery = ""
+                        page = Page.REMOVE
+                    },
+                )
+                Page.REMOVE -> removePage(
+                    people = snap.accepted,
+                    query = removeQuery,
+                    onQuery = { removeQuery = it },
+                    selected = removeSelected,
+                    onToggle = { id -> removeSelected = if (id in removeSelected) removeSelected - id else removeSelected + id },
+                    onSelectAll = { ids -> removeSelected = removeSelected + ids },
+                    onClear = { removeSelected = emptySet() },
+                    onRemove = { confirmRemove = true },
                 )
                 Page.IGNORE -> ignorePage(
                     candidates = ignoreCandidates,
@@ -433,14 +491,7 @@ fun SettingsScreen(
                     onToggle = { id -> ignoreSelected = if (id in ignoreSelected) ignoreSelected - id else ignoreSelected + id },
                     onSelectAll = { ids -> ignoreSelected = ignoreSelected + ids },
                     onClear = { ignoreSelected = emptySet() },
-                    onIgnore = {
-                        val chosen = ignoreCandidates.orEmpty().filter { it.id in ignoreSelected }
-                        repo.ignore(chosen)
-                        toast(if (chosen.size == 1) "Ignored 1 person." else "Ignored ${chosen.size} people.")
-                        ignoreSelected = emptySet()
-                        changed()
-                        page = Page.CONTACTS
-                    },
+                    onIgnore = { confirmIgnore = true },
                 )
                 Page.BREAKS -> breaksPage(
                     snap = snap,
@@ -595,6 +646,59 @@ fun SettingsScreen(
     }
 
     // Add everyone from the phone
+    // "Are you sure?" before ignoring or removing several people at once.
+    if (confirmIgnore) {
+        val chosen = ignoreCandidates.orEmpty().filter { it.id in ignoreSelected }
+        val who = if (chosen.size == 1) "1 person" else "${chosen.size} people"
+        val onList = chosen.count { repo.statuses()[it.id] == Status.ACCEPTED }
+        AlertDialog(
+            onDismissRequest = { confirmIgnore = false },
+            title = { Text("Ignore $who?") },
+            text = {
+                Text(
+                    "Are you sure? They won't show up as swipe cards or in imports until you un-ignore them." +
+                        if (onList > 0) " $onList of them will come off your list and the wheel." else ""
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmIgnore = false
+                    repo.ignore(chosen)
+                    toast(if (chosen.size == 1) "Ignored 1 person." else "Ignored ${chosen.size} people.")
+                    ignoreSelected = emptySet()
+                    changed()
+                    page = Page.CONTACTS
+                }) { Text("Yes, ignore") }
+            },
+            dismissButton = { TextButton(onClick = { confirmIgnore = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmRemove) {
+        val chosen = snap.accepted.filter { it.id in removeSelected }
+        val who = if (chosen.size == 1) "1 person" else "${chosen.size} people"
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Remove $who?") },
+            text = {
+                Text(
+                    "Are you sure? They'll come off your list and the wheel, and you'll swipe on them again " +
+                        "the next time you open the app. Your phone's contacts aren't changed."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemove = false
+                    repo.removeAcceptedMany(chosen.map { it.id })
+                    toast(if (chosen.size == 1) "Removed 1 person." else "Removed ${chosen.size} people.")
+                    removeSelected = emptySet()
+                    changed()
+                    page = Page.CONTACTS
+                }) { Text("Yes, remove") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
+        )
+    }
+
     if (confirmAddAll) {
         val everyone = deck.orEmpty()
         AlertDialog(
@@ -669,33 +773,50 @@ fun SettingsScreen(
 
 private fun LazyListScope.mainPage(s: Settings, snap: Snapshot, onShowTour: () -> Unit, open: (Page) -> Unit) {
     item {
-        Group {
+        Group(list = true) {
             NavRow(
                 "Contacts",
                 "${snap.accepted.size} on your list · ${snap.cooldowns.size} in cooldown · ${snap.rejected.size} passed",
+                AppIcons.People,
             ) { open(Page.CONTACTS) }
             NavRow(
                 "Wheel",
-                "New names every ${dayName(s.batchDay)} · " +
+                (if (s.wheelStyle == WheelStyle.BIG) "Big wheel · " else "") +
+                    "New names every ${dayName(s.batchDay)} · " +
                     if (s.reachedMode == ReachedMode.REFILL) "refill with new names" else "reveal a picture",
+                AppIcons.Wheel,
             ) { open(Page.WHEEL) }
             NavRow(
                 "Reminders",
-                if (s.remindersOn) "${s.reminderFrequency.label} · ${clock(s.windowStartMin)}–${clock(s.windowEndMin)}" else "Off",
+                if (s.remindersOn) {
+                    reminderSummary(s) + if (s.perDayWindows && s.dayWindows.isNotEmpty()) {
+                        " · hours vary by day"
+                    } else {
+                        " · ${clock(s.windowStartMin)}–${clock(s.windowEndMin)}"
+                    }
+                } else {
+                    "Off"
+                },
+                AppIcons.Bell,
             ) { open(Page.REMINDERS) }
-            NavRow("Messages", if (s.message.isBlank()) Settings.messageLabel(s.message) else "\"${s.message}\"") { open(Page.MESSAGES) }
+            NavRow(
+                "Messages",
+                if (s.message.isBlank()) Settings.messageLabel(s.message) else "\"${s.message}\"",
+                AppIcons.Text,
+            ) { open(Page.MESSAGES) }
             NavRow(
                 "Display",
                 "${s.palette.label} · ${s.themeMode.label} · ${TEXT_SCALE_LABELS[nearestIndex(TEXT_SCALES, s.textScale)]} text",
+                AppIcons.Palette,
             ) { open(Page.DISPLAY) }
-            NavRow("Backup & restore", "Save your list and settings to a file") { open(Page.BACKUP) }
-            NavRow("Demo mode & testing", if (s.demoMode) "Demo mode is on" else "Off") { open(Page.DEMO) }
+            NavRow("Backup & restore", "Save your list and settings to a file", AppIcons.Download) { open(Page.BACKUP) }
+            NavRow("Demo mode & testing", if (s.demoMode) "Demo mode is on" else "Off", AppIcons.Flask) { open(Page.DEMO) }
         }
     }
     item {
-        Group("Help") {
-            NavRow("How-to guide", "What every setting does, in plain words") { open(Page.GUIDE) }
-            NavRow("Welcome tour", "See the quick walkthrough again") { onShowTour() }
+        Group("Help", list = true) {
+            NavRow("How-to guide", "What every setting does, in plain words", AppIcons.Book) { open(Page.GUIDE) }
+            NavRow("Welcome tour", "See the quick walkthrough again", AppIcons.Play) { onShowTour() }
         }
     }
     item {
@@ -707,17 +828,29 @@ private fun LazyListScope.contactsPage(
     snap: Snapshot,
     onAdd: () -> Unit,
     onCustomBreaks: () -> Unit,
+    openRow: String?,
+    onToggleRow: (String) -> Unit,
+    onFrequency: (String, KeepFrequency) -> Unit,
+    defaultMin: Int,
+    defaultMax: Int,
+    onCustomBreak: (String, Int, Int) -> Unit,
     onBringBack: (String) -> Unit,
     onRemove: (String) -> Unit,
     onRestore: (String) -> Unit,
     onIgnoreContacts: () -> Unit,
     onUnignore: (String) -> Unit,
+    onRemoveSeveral: () -> Unit,
 ) {
     item {
         Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text("+ Import contacts") }
     }
     item {
         OutlinedButton(onClick = onIgnoreContacts, modifier = Modifier.fillMaxWidth()) { Text("Ignore contacts") }
+    }
+    if (snap.accepted.isNotEmpty()) {
+        item {
+            OutlinedButton(onClick = onRemoveSeveral, modifier = Modifier.fillMaxWidth()) { Text("Remove several from your list") }
+        }
     }
     item {
         OutlinedButton(onClick = onCustomBreaks, modifier = Modifier.fillMaxWidth()) {
@@ -732,10 +865,24 @@ private fun LazyListScope.contactsPage(
     }
 
     item { Header("On your list (${snap.accepted.size})") }
-    item { Note("Removing someone sends them back to swiping: you'll see them the next time you open the app.") }
+    item {
+        Note(
+            "Tap someone to change how often they come up, or to remove them. Removing someone sends them " +
+                "back to swiping: you'll see them the next time you open the app."
+        )
+    }
     items(snap.accepted, key = { "ac-" + it.id }) { c ->
-        val custom = snap.customBreaks[c.id]
-        PersonRow(c.name, custom?.let { "Break: ${breakRange(it.first, it.second)}" }, "Remove") { onRemove(c.id) }
+        HowOftenRow(
+            contact = c,
+            custom = snap.customBreaks[c.id],
+            open = openRow == c.id,
+            onToggle = { onToggleRow(c.id) },
+            onFrequency = { onFrequency(c.id, it) },
+            defaultMin = defaultMin,
+            defaultMax = defaultMax,
+            onCustomBreak = { min, max -> onCustomBreak(c.id, min, max) },
+            onRemove = { onRemove(c.id) },
+        )
     }
 
     item { Header("Passed (${snap.rejected.size})") }
@@ -749,6 +896,58 @@ private fun LazyListScope.contactsPage(
     if (snap.ignored.isEmpty()) item { Note("Nobody yet.") }
     items(snap.ignored, key = { "ig-" + it.id }) { c ->
         PersonRow(c.name, null, "Un-ignore") { onUnignore(c.id) }
+    }
+}
+
+private fun LazyListScope.removePage(
+    people: List<Contact>,
+    query: String,
+    onQuery: (String) -> Unit,
+    selected: Set<String>,
+    onToggle: (String) -> Unit,
+    onSelectAll: (List<String>) -> Unit,
+    onClear: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    item {
+        Note(
+            "Tick everyone you want to take off your list. They come off the wheel too, and you'll swipe on " +
+                "them again next time you open the app."
+        )
+    }
+    item {
+        Button(onClick = onRemove, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Text(
+                when (selected.size) {
+                    0 -> "Choose people to remove"
+                    1 -> "Remove 1 person"
+                    else -> "Remove ${selected.size} people"
+                }
+            )
+        }
+    }
+    item {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            label = { Text("Search") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    val shown = if (query.isBlank()) people else people.filter { it.name.contains(query.trim(), ignoreCase = true) }
+    if (shown.isEmpty()) {
+        item { Note(if (people.isEmpty()) "Nobody on your list yet." else "No matches.") }
+        return
+    }
+    item {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = { onSelectAll(shown.map { it.id }) }) { Text("Select all (${shown.size})") }
+            TextButton(onClick = onClear) { Text("Clear") }
+        }
+    }
+    items(shown, key = { "rm-" + it.id }) { c ->
+        CheckRow(c.name, c.mainNumber, checked = c.id in selected) { onToggle(c.id) }
     }
 }
 
@@ -919,8 +1118,8 @@ private fun LazyListScope.importPage(
         }
     }
     item {
-        Group {
-            NavRow("Pick several at once", "Tick people from your phone's contacts, then swipe on them") { onPick() }
+        Group(list = true) {
+            NavRow("Pick several at once", "Tick people from your phone's contacts, then swipe on them", AppIcons.ListCheck) { onPick() }
             NavRow(
                 "Add everyone",
                 when {
@@ -929,8 +1128,9 @@ private fun LazyListScope.importPage(
                     newCount == 1 -> "Swipe on the 1 person you haven't swiped on yet"
                     else -> "Swipe on all $newCount people you haven't swiped on yet"
                 },
+                AppIcons.People,
             ) { onAddAll() }
-            NavRow("From a contacts file (.vcf)", "Exported from Google Contacts, iCloud, Outlook and others") { onFile() }
+            NavRow("From a contacts file (.vcf)", "Exported from Google Contacts, iCloud, Outlook and others", AppIcons.File) { onFile() }
         }
     }
     if (!canRead) {
@@ -1006,11 +1206,27 @@ private fun LazyListScope.wheelPage(
     onRemovePhoto: (String) -> Unit,
 ) {
     item {
+        Group("Wheel style") {
+            Choices(WheelStyle.entries.map { it.label }, selected = s.wheelStyle.ordinal, perRow = 2) { i ->
+                update { it.copy(wheelStyle = WheelStyle.entries[i]) }
+            }
+            Note(
+                if (s.wheelStyle == WheelStyle.ROUND) {
+                    "A prize wheel tilted back like it's on a table. It spins, and the name under the pointer at the top is your pick."
+                } else {
+                    "A tall wheel that rolls downward, like on a TV game show. Names run across it, and the one " +
+                        "between the two pointers is your pick. With Reveal picture, uncovered names show the " +
+                        "hidden picture behind the wheel."
+                }
+            )
+        }
+    }
+    item {
         Group("New names each week on") {
             Choices(
                 DayOfWeek.entries.map { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) },
                 selected = s.batchDay.ordinal,
-                perRow = 4,
+                perRow = 7,
             ) { i -> update { it.copy(batchDay = DayOfWeek.entries[i]) } }
         }
     }
@@ -1129,13 +1345,31 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
     }
     val dayLabels = DayOfWeek.entries.map { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) }
     when (s.reminderFrequency) {
-        ReminderFrequency.DAILY -> Unit
+        ReminderFrequency.DAILY -> item {
+            Group("On these days") {
+                MultiChoices(
+                    dayLabels,
+                    selected = s.dailyDays.map { it.ordinal }.toSet(),
+                    perRow = 7,
+                ) { i ->
+                    update {
+                        val day = DayOfWeek.entries[i]
+                        val days = if (day in it.dailyDays) it.dailyDays - day else it.dailyDays + day
+                        if (days.isEmpty()) it else it.copy(dailyDays = days) // keep at least one day
+                    }
+                }
+                Note(
+                    if (s.dailyDays.size == 7) "Every day. Tap a day to skip it, for example weekends."
+                    else "Every day you pick. Tap a day to add or remove it."
+                )
+            }
+        }
         ReminderFrequency.WEEKLY, ReminderFrequency.BIWEEKLY -> item {
             Group("On these days") {
                 MultiChoices(
                     dayLabels,
                     selected = s.reminderDays.map { it.ordinal }.toSet(),
-                    perRow = 4,
+                    perRow = 7,
                 ) { i ->
                     update {
                         val day = DayOfWeek.entries[i]
@@ -1169,7 +1403,7 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
             }
             item {
                 Group("On") {
-                    Choices(dayLabels, selected = s.reminderDay.ordinal, perRow = 4) { i ->
+                    Choices(dayLabels, selected = s.reminderDay.ordinal, perRow = 7) { i ->
                         update { it.copy(reminderDay = DayOfWeek.entries[i]) }
                     }
                     Note("The first ${s.reminderDay.getDisplayName(TextStyle.FULL, Locale.getDefault())} of each month you pick.")
@@ -1201,7 +1435,7 @@ private fun LazyListScope.messagesPage(
     onEdit: (Int) -> Unit,
     onDelete: (Int) -> Unit,
 ) {
-    item { Note("Your chosen message pre-fills Text and Share. Tap one to choose it.") }
+    item { Note("Your chosen message pre-fills Text and Share, and Text on the home screen widget. Tap one to choose it.") }
     item {
         Group("Messages") {
             Settings.BUILT_IN_MESSAGES.forEach { m -> SelectRow(Settings.messageLabel(m), s.message == m) { onSelect(m) } }
@@ -1342,31 +1576,48 @@ private fun LazyListScope.demoPage(
 // Building blocks
 // =====================================================================
 
+/** A small grey heading above a group, like "HELP". */
 @Composable
-private fun Group(title: String? = null, content: @Composable () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (title != null) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(Locale.getDefault()),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp)
+            .semantics { heading() },
+    )
+}
+
+/**
+ * A white, outlined group with an optional label above it.
+ * [list] = a list of [NavRow]s: no inner padding, and thin lines between the rows.
+ */
+@Composable
+private fun Group(title: String? = null, list: Boolean = false, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (title != null) SectionLabel(title)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .raised(RoundedCornerShape(20.dp), 6.dp),
+        ) {
+            // Text in a group uses the card's text color (light text in dark mode).
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                if (list) {
+                    // Each row draws a line above itself; shifting up 1dp hides the first one.
+                    Column(Modifier.offset(y = (-1).dp)) { content() }
+                } else {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+                }
             }
-            content()
         }
     }
 }
 
 @Composable
 private fun Header(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(top = 8.dp, start = 4.dp),
-    )
+    SectionLabel(text)
 }
 
 @Composable
@@ -1379,111 +1630,176 @@ private fun Note(text: String) {
     )
 }
 
+/**
+ * A link to another page: a small raised icon tile, title, a short summary, and an arrow.
+ * Use inside Group(list = true).
+ */
 @Composable
-private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
+private fun NavRow(title: String, subtitle: String, icon: ImageVector? = null, onClick: () -> Unit) {
+    val line = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .drawBehind { drawLine(line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp, horizontal = 4.dp),
+            .padding(start = if (icon != null) 12.dp else 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
+        if (icon != null) {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .raised(RoundedCornerShape(11.dp), 2.dp, Tone.Soft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Text("›", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            AppIcons.Chevron,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .padding(start = 8.dp)
+                .size(18.dp),
+        )
     }
 }
 
 @Composable
 private fun ToggleRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             if (subtitle != null) {
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
-/** A row of buttons where the chosen one is filled in. */
+/** Fewer per row when the text is bigger, so labels never get cut off. */
+@Composable
+private fun columnsFor(perRow: Int): Int {
+    val fontScale = LocalDensity.current.fontScale
+    return when {
+        fontScale >= 1.25f -> minOf(perRow, 2)
+        fontScale >= 1.1f -> minOf(perRow, 3)
+        else -> perRow
+    }
+}
+
+/**
+ * Pick one. When they all fit on one line: a sliding switch, with the chosen one raised.
+ * Otherwise: rounded pills, with the chosen one filled in.
+ */
 @Composable
 private fun Choices(options: List<String>, selected: Int, perRow: Int, onSelect: (Int) -> Unit) {
-    // Bigger text = fewer buttons per row, so labels never get cut off.
-    val fontScale = LocalDensity.current.fontScale
-    val columns = when {
-        fontScale >= 1.25f -> minOf(perRow, 2)
-        fontScale >= 1.1f -> minOf(perRow, 3)
-        else -> perRow
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.withIndex().chunked(columns).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                row.forEach { (i, label) ->
-                    val pad = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-                    val buttonModifier = Modifier
+    val columns = columnsFor(perRow)
+    if (options.size <= columns) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .recessed(RoundedCornerShape(15.dp))
+                .padding(4.dp)
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            options.forEachIndexed { i, label ->
+                val on = i == selected
+                Box(
+                    Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp)
-                    if (i == selected) {
-                        Button(onClick = { onSelect(i) }, modifier = buttonModifier, contentPadding = pad) {
-                            Text(label, textAlign = TextAlign.Center)
-                        }
-                    } else {
-                        OutlinedButton(onClick = { onSelect(i) }, modifier = buttonModifier, contentPadding = pad) {
-                            Text(label, textAlign = TextAlign.Center)
-                        }
-                    }
+                        .heightIn(min = 44.dp)
+                        .then(
+                            if (on) Modifier.raised(RoundedCornerShape(11.dp), 3.dp)
+                            else Modifier.clip(RoundedCornerShape(11.dp))
+                        )
+                        .selectable(selected = on, role = Role.RadioButton, onClick = { onSelect(i) })
+                        .padding(horizontal = 2.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
                 }
-                // Keep buttons the same width on a short last row.
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
+    } else {
+        PillGrid(options, columns, isOn = { it == selected }, role = Role.RadioButton, onClick = onSelect)
     }
 }
 
-/** Like [Choices], but any number can be picked. Picked ones are filled in and ticked. */
+/** Like [Choices], but any number can be picked. Picked ones are filled in. */
 @Composable
 private fun MultiChoices(options: List<String>, selected: Set<Int>, perRow: Int, onToggle: (Int) -> Unit) {
-    val fontScale = LocalDensity.current.fontScale
-    val columns = when {
-        fontScale >= 1.25f -> minOf(perRow, 2)
-        fontScale >= 1.1f -> minOf(perRow, 3)
-        else -> perRow
-    }
+    PillGrid(options, columnsFor(perRow), isOn = { it in selected }, role = Role.Checkbox, onClick = onToggle)
+}
+
+@Composable
+private fun PillGrid(options: List<String>, columns: Int, isOn: (Int) -> Boolean, role: Role, onClick: (Int) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.withIndex().chunked(columns).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 row.forEach { (i, label) ->
-                    val pad = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-                    val buttonModifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                        .semantics { stateDescription = if (i in selected) "Selected" else "Not selected" }
-                    if (i in selected) {
-                        Button(onClick = { onToggle(i) }, modifier = buttonModifier, contentPadding = pad) {
-                            Text("✓ $label", textAlign = TextAlign.Center)
-                        }
-                    } else {
-                        OutlinedButton(onClick = { onToggle(i) }, modifier = buttonModifier, contentPadding = pad) {
-                            Text(label, textAlign = TextAlign.Center)
-                        }
+                    val on = isOn(i)
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp)
+                            .then(
+                                if (on) Modifier.raised(CircleShape, 4.dp, Tone.Ink)
+                                else Modifier.clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            )
+                            .then(
+                                if (role == Role.Checkbox) {
+                                    Modifier.toggleable(value = on, role = role, onValueChange = { onClick(i) })
+                                } else {
+                                    Modifier.selectable(selected = on, role = role, onClick = { onClick(i) })
+                                }
+                            )
+                            .padding(horizontal = 2.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                        )
                     }
                 }
+                // Keep pills the same width on a short last row.
                 repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
 
+/** A value with round − and + buttons. */
 @Composable
 private fun Stepper(
     title: String,
@@ -1493,31 +1809,13 @@ private fun Stepper(
     onMinus: () -> Unit,
     onPlus: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(
-                onClick = onMinus,
-                enabled = canMinus,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.sizeIn(minWidth = 52.dp, minHeight = 52.dp),
-            ) { Text("−", style = MaterialTheme.typography.titleLarge) }
-            Text(
-                value,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 8.dp),
-                textAlign = TextAlign.Center,
-            )
-            OutlinedButton(
-                onClick = onPlus,
-                enabled = canPlus,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.sizeIn(minWidth = 52.dp, minHeight = 52.dp),
-            ) { Text("+", style = MaterialTheme.typography.titleLarge) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        CircleIconButton(AppIcons.Minus, "Less: $title", onMinus, enabled = canMinus)
+        CircleIconButton(AppIcons.Plus, "More: $title", onPlus, enabled = canPlus)
     }
 }
 
@@ -1532,6 +1830,7 @@ private fun CheckRow(name: String, detail: String?, checked: Boolean, onToggle: 
         colors = CardDefaults.cardColors(
             containerColor = if (checked) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
         ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
         Row(Modifier.padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = checked, onCheckedChange = { onToggle() })
@@ -1545,12 +1844,137 @@ private fun CheckRow(name: String, detail: String?, checked: Boolean, onToggle: 
     }
 }
 
+/**
+ * Someone on your list, with how often they come up. Tap to open the choices: the four from the
+ * swipe screen plus Custom (pick Shortest and Longest right here), and Remove.
+ */
+@Composable
+private fun HowOftenRow(
+    contact: Contact,
+    custom: Pair<Int, Int>?,
+    open: Boolean,
+    defaultMin: Int,
+    defaultMax: Int,
+    onToggle: () -> Unit,
+    onFrequency: (KeepFrequency) -> Unit,
+    onCustomBreak: (Int, Int) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val freq = KeepFrequency.of(custom?.first, custom?.second)
+    // Custom stays chosen while the row is open, even if the days you set happen to match one of the four.
+    var customMode by remember(contact.id) { mutableStateOf(freq == null) }
+    val customOn = customMode || freq == null
+    // Closing the row settles it: it then shows whatever the saved days match.
+    LaunchedEffect(open) { if (!open) customMode = freq == null }
+    val chip = when {
+        freq == null -> "Custom"
+        freq == KeepFrequency.FEW_MONTHS -> "2–4 months"
+        freq == KeepFrequency.SURPRISE -> "Surprise"
+        else -> freq.label
+    }
+    val detail = when {
+        freq == null && custom != null -> "Break: ${breakRange(custom.first, custom.second)}"
+        freq == KeepFrequency.SURPRISE -> "Your usual break"
+        else -> freq?.blurb
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .raised(RoundedCornerShape(16.dp), 4.dp),
+    ) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(onClickLabel = if (open) "Close" else "Change how often", onClick = onToggle)
+                    .semantics { stateDescription = "How often: ${freq?.label ?: "custom"}" }
+                    .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(contact.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (detail != null) {
+                        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Box(
+                    Modifier
+                        .recessed(CircleShape)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(chip, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+                Icon(
+                    AppIcons.Chevron,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .rotate(if (open) 90f else 0f),
+                )
+            }
+            if (open) {
+                // The range the steppers show: this person's own, otherwise the usual one.
+                val minI = nearestIndex(BREAK_OPTIONS, custom?.first ?: defaultMin)
+                val maxI = maxOf(nearestIndex(BREAK_OPTIONS, custom?.second ?: defaultMax), minI)
+                Column(
+                    Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FrequencyPicker(
+                        selected = freq,
+                        onSelect = {
+                            customMode = false
+                            onFrequency(it)
+                        },
+                        showCustom = true,
+                        customOn = customOn,
+                        onCustom = {
+                            if (!customOn) {
+                                customMode = true
+                                // Start from their current range, rounded to the steps below. If that lands
+                                // exactly on one of the four, make it one step longer so it really is custom.
+                                var hi = maxI
+                                val lands = KeepFrequency.of(BREAK_OPTIONS[minI], BREAK_OPTIONS[hi])
+                                if (lands != null && hi < BREAK_OPTIONS.lastIndex) hi++
+                                onCustomBreak(BREAK_OPTIONS[minI], BREAK_OPTIONS[hi])
+                            }
+                        },
+                    )
+                    if (customOn) {
+                        Stepper(
+                            "Shortest",
+                            breakLabel(BREAK_OPTIONS[minI]),
+                            canMinus = minI > 0,
+                            canPlus = minI < BREAK_OPTIONS.lastIndex,
+                            onMinus = { onCustomBreak(BREAK_OPTIONS[minI - 1], BREAK_OPTIONS[maxI]) },
+                            onPlus = { onCustomBreak(BREAK_OPTIONS[minI + 1], BREAK_OPTIONS[maxOf(maxI, minI + 1)]) },
+                        )
+                        Stepper(
+                            "Longest",
+                            breakLabel(BREAK_OPTIONS[maxI]),
+                            canMinus = maxI > 0,
+                            canPlus = maxI < BREAK_OPTIONS.lastIndex,
+                            onMinus = { onCustomBreak(BREAK_OPTIONS[minOf(minI, maxI - 1)], BREAK_OPTIONS[maxI - 1]) },
+                            onPlus = { onCustomBreak(BREAK_OPTIONS[minI], BREAK_OPTIONS[maxI + 1]) },
+                        )
+                    }
+                    TextButton(onClick = onRemove, modifier = Modifier.align(Alignment.End)) { Text("Remove from list") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun PersonRow(name: String, detail: String?, action: String, onAction: () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
         Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -1600,7 +2024,7 @@ private fun PaletteRow(palette: ColorPalette, selected: Boolean, onClick: () -> 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        if (selected) Icon(AppIcons.Check, contentDescription = "Chosen", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -1616,7 +2040,7 @@ private fun SelectRow(text: String, selected: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        if (selected) Icon(AppIcons.Check, contentDescription = "Chosen", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -1656,40 +2080,107 @@ private fun hasContactsPermission(context: Context) =
 
 private fun dayName(d: DayOfWeek) = d.getDisplayName(TextStyle.FULL, Locale.getDefault())
 
-/** "Only between": two time fields. Tap one to type a new time. */
+/** "Daily", or "Daily · Mon, Tue, Wed" when some days are skipped. */
+private fun reminderSummary(s: Settings): String =
+    if (s.reminderFrequency == ReminderFrequency.DAILY && s.dailyDays.size in 1..6) {
+        "Daily · " + s.dailyDays.sortedBy { it.value }.joinToString(", ") { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) }
+    } else {
+        s.reminderFrequency.label
+    }
+
+/** Which hours the time editor is changing: the usual window ([day] = null) or one day's own hours. */
+private data class WindowEdit(val day: DayOfWeek?, val isStart: Boolean)
+
+/**
+ * "Only between": the usual reminder hours (two time fields, tap one to type a new time), and
+ * optionally different hours on some days, for example later starts on weekends.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReminderWindow(s: Settings, update: ((Settings) -> Settings) -> Unit) {
-    // null = no dialog, true = editing From, false = editing Until
-    var editing by remember { mutableStateOf<Boolean?>(null) }
+    var editing by remember { mutableStateOf<WindowEdit?>(null) }
     val stacked = LocalDensity.current.fontScale >= 1.25f
 
-    Group("Only between") {
+    // One list item holding both groups, one above the other.
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Group(if (s.perDayWindows) "Usual hours" else "Only between") {
         if (stacked) {
-            TimeField("From", clock(s.windowStartMin), Modifier.fillMaxWidth()) { editing = true }
-            TimeField("Until", clock(s.windowEndMin), Modifier.fillMaxWidth()) { editing = false }
+            TimeField("From", clock(s.windowStartMin), Modifier.fillMaxWidth()) { editing = WindowEdit(null, true) }
+            TimeField("Until", clock(s.windowEndMin), Modifier.fillMaxWidth()) { editing = WindowEdit(null, false) }
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TimeField("From", clock(s.windowStartMin), Modifier.weight(1f)) { editing = true }
-                TimeField("Until", clock(s.windowEndMin), Modifier.weight(1f)) { editing = false }
+                TimeField("From", clock(s.windowStartMin), Modifier.weight(1f)) { editing = WindowEdit(null, true) }
+                TimeField("Until", clock(s.windowEndMin), Modifier.weight(1f)) { editing = WindowEdit(null, false) }
             }
         }
         Note("Tap a time to change it. Reminders and 1-hour snoozes only arrive inside this window.")
+        ToggleRow(
+            "Different hours on some days",
+            if (s.perDayWindows) "Set each day's hours below" else "For example, a later start on weekends",
+            s.perDayWindows,
+        ) { on -> update { it.copy(perDayWindows = on) } }
     }
 
-    val isStart = editing ?: return
-    key(isStart) {
-        val current = if (isStart) s.windowStartMin else s.windowEndMin
+    if (s.perDayWindows) {
+        Group("Hours for each day") {
+            DayOfWeek.entries.forEach { day ->
+                val (start, end) = s.windowFor(day)
+                val own = day in s.dayWindows
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            day.getDisplayName(TextStyle.FULL, Locale.getDefault()),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (own) {
+                            TextButton(onClick = { update { it.copy(dayWindows = it.dayWindows - day) } }) {
+                                Text("Use usual hours")
+                            }
+                        } else {
+                            Text(
+                                "Usual hours",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (stacked) {
+                        TimeField("From", clock(start), Modifier.fillMaxWidth()) { editing = WindowEdit(day, true) }
+                        TimeField("Until", clock(end), Modifier.fillMaxWidth()) { editing = WindowEdit(day, false) }
+                    } else {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            TimeField("From", clock(start), Modifier.weight(1f)) { editing = WindowEdit(day, true) }
+                            TimeField("Until", clock(end), Modifier.weight(1f)) { editing = WindowEdit(day, false) }
+                        }
+                    }
+                }
+            }
+            Note("Change a day's times to give it its own hours. Days you leave alone use your usual hours.")
+        }
+    }
+    }
+
+    val edit = editing ?: return
+    key(edit) {
+        val editDay = edit.day
+        val (curStart, curEnd) = if (editDay == null) s.windowStartMin to s.windowEndMin else s.windowFor(editDay)
+        val current = if (edit.isStart) curStart else curEnd
         val state = rememberTimePickerState(initialHour = current / 60, initialMinute = current % 60, is24Hour = false)
         val picked = state.hour * 60 + state.minute
-        val problem = if (isStart) {
-            if (picked > s.windowEndMin - 60) "Choose a time at least 1 hour before ${clock(s.windowEndMin)}." else null
+        val problem = if (edit.isStart) {
+            if (picked > curEnd - 60) "Choose a time at least 1 hour before ${clock(curEnd)}." else null
         } else {
-            if (picked < s.windowStartMin + 60) "Choose a time at least 1 hour after ${clock(s.windowStartMin)}." else null
+            if (picked < curStart + 60) "Choose a time at least 1 hour after ${clock(curStart)}." else null
         }
+        val dayLabel = edit.day?.getDisplayName(TextStyle.FULL, Locale.getDefault())
         AlertDialog(
             onDismissRequest = { editing = null },
-            title = { Text(if (isStart) "Reminders from" else "Reminders until") },
+            title = {
+                Text(
+                    (if (edit.isStart) "Reminders from" else "Reminders until") + if (dayLabel != null) " on $dayLabel" else ""
+                )
+            },
             text = {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1710,7 +2201,16 @@ private fun ReminderWindow(s: Settings, update: ((Settings) -> Settings) -> Unit
                 TextButton(
                     enabled = problem == null,
                     onClick = {
-                        update { if (isStart) it.copy(windowStartMin = picked) else it.copy(windowEndMin = picked) }
+                        val day = edit.day
+                        update {
+                            when {
+                                day == null && edit.isStart -> it.copy(windowStartMin = picked)
+                                day == null -> it.copy(windowEndMin = picked)
+                                // A day gets its own hours as soon as one of its times is changed.
+                                edit.isStart -> it.copy(dayWindows = it.dayWindows + (day to (picked to curEnd)))
+                                else -> it.copy(dayWindows = it.dayWindows + (day to (curStart to picked)))
+                            }
+                        }
                         editing = null
                     },
                 ) { Text("Save") }

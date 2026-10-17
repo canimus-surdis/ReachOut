@@ -2,6 +2,7 @@ package com.canimussurdis.reachout.data
 
 import android.content.Context
 import com.canimussurdis.reachout.reminders.Reminders
+import com.canimussurdis.reachout.widget.ReachOutWidgets
 import java.io.File
 import java.time.DayOfWeek
 import kotlin.random.Random
@@ -59,9 +60,51 @@ class ReachOutRepository private constructor(private val context: Context) {
                 }
             }
             if (changed) save()
-            return all.filter { it.id !in state.records }.shuffled(random)
+            return undecidedLocked(all).shuffled(random)
         }
     }
+
+    /**
+     * The same person can be in your contacts more than once (for example from Google and the SIM,
+     * or a .vcf import), each with its own id. Treat the same name with a shared phone number as one
+     * person, so passing on (or keeping, or ignoring) one copy covers the others too.
+     */
+    private fun personKeys(c: Contact): List<String> {
+        val name = c.name.trim().lowercase()
+        val numbers = c.phones.map { p -> p.number.filter { it.isDigit() }.takeLast(10) }.filter { it.isNotEmpty() }
+        return if (numbers.isEmpty()) listOf("$name|") else numbers.map { "$name|$it" }
+    }
+
+    /** People nobody has decided on yet (by id, or as a duplicate of someone decided), one card per person. */
+    private fun undecidedLocked(contacts: List<Contact>): List<Contact> {
+        val decided = HashSet<String>()
+        state.records.values.forEach { r -> decided += personKeys(r.contact) }
+        val seen = HashSet<String>()
+        return contacts.filter { c ->
+            if (c.id in state.records) return@filter false
+            val keys = personKeys(c)
+            if (keys.any { it in decided || it in seen }) return@filter false
+            seen += keys
+            true
+        }
+    }
+
+    /**
+     * Removed, restored or un-ignored: forget the decision for this person, including any duplicate
+     * copies with the same status, and put them back in line to be swiped on. Call inside the lock.
+     */
+    private fun releasePerson(id: String) {
+        val record = state.records.remove(id) ?: return
+        val keys = personKeys(record.contact).toSet()
+        state.records.values
+            .filter { it.status == record.status && personKeys(it.contact).any { k -> k in keys } }
+            .map { it.contact.id }
+            .forEach { state.records.remove(it) }
+        state.pendingSwipe[id] = record.contact
+    }
+
+    /** See [undecidedLocked]. */
+    fun undecided(contacts: List<Contact>): List<Contact> = synchronized(lock) { undecidedLocked(contacts) }
 
     /**
      * After restoring a backup on a new phone, contacts have new ids. Match saved people to phone
@@ -90,6 +133,7 @@ class ReachOutRepository private constructor(private val context: Context) {
                 state.batch = b.copy(
                     slots = b.slots.map { if (it.contactId == oldId) it.copy(contactId = c.id) else it },
                     retired = b.retired.map { if (it == oldId) c.id else it }.toSet(),
+                    skipped = b.skipped.map { if (it == oldId) c.id else it }.toSet(),
                 )
             }
             if (state.currentPick == oldId) state.currentPick = c.id
@@ -102,13 +146,22 @@ class ReachOutRepository private constructor(private val context: Context) {
     fun reloadFromDisk() = synchronized(lock) {
         settings = Storage.readSettings(file(SETTINGS_FILE))
         state = Storage.readState(stateFile())
+        updateWidgets()
     }
 
     internal fun dataFile(name: String) = file(name)
 
-    fun accept(contact: Contact) = synchronized(lock) {
-        state.records[contact.id] = ContactRecord(contact, Status.ACCEPTED, decidedAt = now())
+    /** Keep someone. [frequency] sets how long they rest after you connect (Surprise me = the usual break). */
+    fun accept(contact: Contact, frequency: KeepFrequency = KeepFrequency.SURPRISE) = synchronized(lock) {
+        state.records[contact.id] = ContactRecord(
+            contact,
+            Status.ACCEPTED,
+            decidedAt = now(),
+            customMinDays = frequency.minDays,
+            customMaxDays = frequency.maxDays,
+        )
         state.reswipe -= contact.id
+        state.pendingSwipe.remove(contact.id)
         if (settings.reachedMode == ReachedMode.REFILL) topUpWheel()
         save()
     }
@@ -124,6 +177,7 @@ class ReachOutRepository private constructor(private val context: Context) {
             if (c.id in state.records) continue
             state.records[c.id] = ContactRecord(c, Status.ACCEPTED, decidedAt = now)
             state.reswipe -= c.id
+            state.pendingSwipe.remove(c.id)
             added++
         }
         if (added > 0) {
@@ -156,6 +210,7 @@ class ReachOutRepository private constructor(private val context: Context) {
     fun reject(contact: Contact) = synchronized(lock) {
         state.records[contact.id] = ContactRecord(contact, Status.REJECTED, decidedAt = now())
         state.reswipe -= contact.id
+        state.pendingSwipe.remove(contact.id)
         save()
     }
 
@@ -163,17 +218,30 @@ class ReachOutRepository private constructor(private val context: Context) {
      * Settings → Contacts: take someone off your accepted list. They go back into the swipe deck,
      * and you'll swipe on them again the next time the app opens.
      */
-    fun removeAccepted(id: String) = synchronized(lock) {
-        takeOffWheel(id, reached = false)
-        state.records.remove(id)
-        state.reswipe += id
-        save()
+    fun removeAccepted(id: String) {
+        synchronized(lock) {
+            takeOffWheel(id, reached = false)
+            releasePerson(id)
+            save()
+        }
+        Reminders.clearFor(context, listOf(id))
+    }
+
+    /** Settings → Contacts → Remove several: like [removeAccepted], for many people at once. */
+    fun removeAcceptedMany(ids: Collection<String>) {
+        synchronized(lock) {
+            for (id in ids) {
+                takeOffWheel(id, reached = false)
+                releasePerson(id)
+            }
+            save()
+        }
+        Reminders.clearFor(context, ids)
     }
 
     /** Settings → Contacts: bring someone back from the Passed list. Swiped on again next time the app opens. */
     fun restoreRejected(id: String) = synchronized(lock) {
-        state.records.remove(id)
-        state.reswipe += id
+        releasePerson(id)
         save()
     }
 
@@ -181,24 +249,27 @@ class ReachOutRepository private constructor(private val context: Context) {
      * Settings → Contacts → Ignore: these people never show up as swipe cards or in imports until
      * un-ignored. Anyone on your list comes off it (and off the wheel).
      */
-    fun ignore(contacts: Collection<Contact>) = synchronized(lock) {
-        for (c in contacts) {
-            takeOffWheel(c.id, reached = false)
-            if (state.currentPick == c.id) {
-                state.currentPick = null
-                state.pickSnoozed = false
+    fun ignore(contacts: Collection<Contact>) {
+        synchronized(lock) {
+            for (c in contacts) {
+                takeOffWheel(c.id, reached = false)
+                if (state.currentPick == c.id) {
+                    state.currentPick = null
+                    state.pickSnoozed = false
+                }
+                state.reswipe -= c.id
+                state.pendingSwipe.remove(c.id)
+                state.records[c.id] = ContactRecord(c, Status.IGNORED, decidedAt = now())
             }
-            state.reswipe -= c.id
-            state.records[c.id] = ContactRecord(c, Status.IGNORED, decidedAt = now())
+            save()
         }
-        save()
+        Reminders.clearFor(context, contacts.map { it.id })
     }
 
     /** Un-ignore: back to the swipe deck, and swiped on again the next time the app opens. */
     fun unignore(id: String) = synchronized(lock) {
         if (state.records[id]?.status == Status.IGNORED) {
-            state.records.remove(id)
-            state.reswipe += id
+            releasePerson(id)
             save()
         }
     }
@@ -206,7 +277,23 @@ class ReachOutRepository private constructor(private val context: Context) {
     /** What each saved person is (on your list, passed or ignored), by id. */
     fun statuses(): Map<String, Status> = synchronized(lock) { state.records.mapValues { it.value.status } }
 
-    /** People waiting to be swiped on again (see [removeAccepted]). */
+    /** Import contacts: these people wait as swipe cards (shown now, and each time the app opens until decided). */
+    fun queueForSwipe(contacts: Collection<Contact>) = synchronized(lock) {
+        var changed = false
+        for (c in contacts) {
+            if (c.id in state.records || c.id in state.pendingSwipe) continue
+            state.pendingSwipe[c.id] = c
+            changed = true
+        }
+        if (changed) save()
+    }
+
+    /** Everyone waiting to be swiped on, not yet decided. */
+    fun pendingSwipe(): List<Contact> = synchronized(lock) {
+        undecidedLocked(state.pendingSwipe.values.toList())
+    }
+
+    /** People waiting to be swiped on again (older saved data, by id only). */
     fun reswipeIds(): Set<String> = synchronized(lock) { state.reswipe.toSet() }
 
     /** Forget re-swipes for people who can't be shown (e.g. no longer in your phone's contacts). */
@@ -242,6 +329,26 @@ class ReachOutRepository private constructor(private val context: Context) {
 
     /** Whether the current pick has already been snoozed once. */
     fun isPickSnoozed(): Boolean = synchronized(lock) { state.currentPick != null && state.pickSnoozed }
+
+    /** What the home screen widgets show: the pick (if any), and whether anyone is on your list. */
+    data class WidgetInfo(val pick: Contact?, val hasPeople: Boolean)
+
+    fun widgetInfo(): WidgetInfo = synchronized(lock) {
+        val pick = state.currentPick?.let { state.records[it] }?.takeIf { it.status == Status.ACCEPTED }?.contact
+        WidgetInfo(pick, state.records.values.any { it.status == Status.ACCEPTED })
+    }
+
+    /** What the widgets showed last time, so they're only redrawn when something they show changes. */
+    private var widgetKey: String? = null
+
+    private fun updateWidgets() {
+        val info = widgetInfo()
+        val key = "${info.pick?.id}|${info.pick?.name}|${info.pick?.mainNumber}|${info.hasPeople}"
+        if (key == widgetKey) return
+        widgetKey = key
+        // A widget problem must never stop your data from saving.
+        runCatching { ReachOutWidgets.refresh(context) }
+    }
 
     /** The person waiting in the result box, if any (and still on your list). */
     fun currentPick(): Contact? = synchronized(lock) {
@@ -293,53 +400,62 @@ class ReachOutRepository private constructor(private val context: Context) {
     }
 
     /** Call, Text or Share was tapped. The app will ask "Did you connect?" next time it opens. */
-    fun markReachedOut(id: String) = synchronized(lock) {
-        val r = state.records[id] ?: return@synchronized
-        if (r.pendingCheckAt == null) {
-            state.records[id] = r.copy(pendingCheckAt = now())
+    fun markReachedOut(id: String) {
+        synchronized(lock) {
+            val r = state.records[id] ?: return@synchronized
+            if (r.pendingCheckAt == null) {
+                state.records[id] = r.copy(pendingCheckAt = now())
+            }
+            if (state.currentPick == id) {
+                state.currentPick = null
+                state.pickSnoozed = false
+            }
+            save()
         }
-        if (state.currentPick == id) {
-            state.currentPick = null
-            state.pickSnoozed = false
-        }
-        save()
+        Reminders.clearFor(context, listOf(id))
     }
 
     /** The answer to "Did you connect with …?". */
-    fun answerCheck(id: String, connected: Boolean) = synchronized(lock) {
-        val r = state.records[id] ?: return@synchronized
-        val start = r.pendingCheckAt ?: now()
-        if (connected) {
-            // This person's own break length if one is set, otherwise the default.
-            val min = (r.customMinDays ?: settings.cooldownMinDays).coerceAtLeast(0)
-            val max = (r.customMaxDays ?: settings.cooldownMaxDays).coerceAtLeast(min)
-            val days = random.nextInt(min, max + 1)
-            state.records[id] = r.copy(pendingCheckAt = null, cooldownUntil = start + days * Schedule.DAY_MS)
-            takeOffWheel(id, reached = true)
-        } else {
-            state.records[id] = r.copy(pendingCheckAt = null)
-            // Back to pool: off this week's wheel for good (not even used to fill a gap), no cooldown,
-            // and back in the pool to be drawn again from the next batch day.
-            if (settings.notYetMode == NotYetMode.NEXT_WEEK) {
-                state.batch?.let { state.batch = it.copy(skipped = it.skipped + id) }
-                takeOffWheel(id, reached = false)
+    fun answerCheck(id: String, connected: Boolean) {
+        synchronized(lock) {
+            val r = state.records[id] ?: return@synchronized
+            val start = r.pendingCheckAt ?: now()
+            if (connected) {
+                // This person's own break length if one is set, otherwise the default.
+                val min = (r.customMinDays ?: settings.cooldownMinDays).coerceAtLeast(0)
+                val max = (r.customMaxDays ?: settings.cooldownMaxDays).coerceAtLeast(min)
+                val days = random.nextInt(min, max + 1)
+                state.records[id] = r.copy(pendingCheckAt = null, cooldownUntil = start + days * Schedule.DAY_MS)
+                takeOffWheel(id, reached = true)
+            } else {
+                state.records[id] = r.copy(pendingCheckAt = null)
+                // Back to pool: off this week's wheel for good (not even used to fill a gap), no cooldown,
+                // and back in the pool to be drawn again from the next batch day.
+                if (settings.notYetMode == NotYetMode.NEXT_WEEK) {
+                    state.batch?.let { state.batch = it.copy(skipped = it.skipped + id) }
+                    takeOffWheel(id, reached = false)
+                }
             }
+            save()
         }
-        save()
+        Reminders.clearFor(context, listOf(id))
     }
 
     /**
      * Snooze → Back to pool: off this week's wheel for good (not even used to fill a gap), no cooldown.
      * They're back in the pool and can be drawn again from the next batch day.
      */
-    fun skip(id: String) = synchronized(lock) {
-        state.batch?.let { state.batch = it.copy(skipped = it.skipped + id) }
-        takeOffWheel(id, reached = false)
-        if (state.currentPick == id) {
-            state.currentPick = null
-            state.pickSnoozed = false
+    fun skip(id: String) {
+        synchronized(lock) {
+            state.batch?.let { state.batch = it.copy(skipped = it.skipped + id) }
+            takeOffWheel(id, reached = false)
+            if (state.currentPick == id) {
+                state.currentPick = null
+                state.pickSnoozed = false
+            }
+            save()
         }
-        save()
+        Reminders.clearFor(context, listOf(id))
     }
 
     /** Settings → Contacts: "Bring back now". */
@@ -385,6 +501,7 @@ class ReachOutRepository private constructor(private val context: Context) {
             // Reminder times belong to one clock (real or pretend), so start them over.
             updateSettings(settings.copy(demoMode = on, demoTimeOffsetMs = 0L).withFreshReminders())
             state = Storage.readState(stateFile())
+            updateWidgets()
         }
         Reminders.rescheduleAll(context)
     }
@@ -414,6 +531,7 @@ class ReachOutRepository private constructor(private val context: Context) {
             file(DEMO_STATE_FILE).delete()
             updateSettings(settings.copy(demoTimeOffsetMs = 0L).withFreshReminders())
             state = AppState()
+            updateWidgets()
         }
         Reminders.rescheduleAll(context)
     }
@@ -429,7 +547,10 @@ class ReachOutRepository private constructor(private val context: Context) {
 
     private fun stateFile() = file(if (settings.demoMode) DEMO_STATE_FILE else STATE_FILE)
 
-    private fun save() = Storage.writeState(stateFile(), state)
+    private fun save() {
+        Storage.writeState(stateFile(), state)
+        updateWidgets()
+    }
 
     private fun updateSettings(s: Settings) {
         settings = s
@@ -489,8 +610,6 @@ class ReachOutRepository private constructor(private val context: Context) {
      * Take someone off this week's wheel.
      * Refill mode: a random eligible person takes the same spot (or the spot goes away if nobody's left).
      * Reveal mode: the spot stays, uncovered if you connected, covered if not.
-     */
-    /**
      * [retire] = true keeps them off the wheel until the next batch day.
      * false ("Not yet") frees the spot but leaves them in the pool, so they can come back this week.
      */

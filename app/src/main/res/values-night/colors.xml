@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash screen background in dark mode (the app's dark background). -->
+    <color name="splash_background">#FF1F1C24</color>
+    <!-- Home screen widgets in dark mode. -->
+    <color name="widget_bg">#FF1B1B1E</color>
+    <color name="widget_text">#FFF1F1F3</color>
+    <color name="widget_muted">#FFA0A0A8</color>
+    <color name="widget_primary">#FFDCDCE0</color>
+    <color name="widget_on_primary">#FF111113</color>
+    <color name="widget_bg_bottom">#FF1C1C20</color>
+    <color name="widget_shadow">#66000000</color>
+    <color name="widget_primary_top">#FFFFFFFF</color>
+    <color name="widget_rim">#FF0E0E10</color>
+</resources>

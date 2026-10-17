@@ -19,9 +19,18 @@ object WheelPhotos {
 
     private const val MAX_SIDE = 1600
 
+    /** The only names the app ever gives photos. Anything else (like "../settings.json") is refused. */
+    private val SAFE_NAME = Regex("""photo_[A-Za-z0-9-]+\.jpg""")
+
+    fun isSafeName(name: String): Boolean = SAFE_NAME.matches(name)
+
     private fun folder(context: Context) = File(context.filesDir, "wheel_photos").apply { mkdirs() }
 
-    fun file(context: Context, name: String) = File(folder(context), name)
+    /**
+     * A photo's file, always inside the photos folder. A name the app didn't make (for example from a
+     * damaged or tampered backup) points at a file that never exists, so nothing outside can be read or deleted.
+     */
+    fun file(context: Context, name: String) = File(folder(context), if (isSafeName(name)) name else ".invalid")
 
     /** Copies picked photos in. Returns the new file names (photos that fail to load are skipped). */
     fun import(context: Context, uris: List<Uri>): List<String> = uris.mapNotNull { uri ->
@@ -45,8 +54,16 @@ object WheelPhotos {
         file(context, name).delete()
     }
 
-    fun load(context: Context, name: String): Bitmap? =
-        runCatching { BitmapFactory.decodeFile(file(context, name).path) }.getOrNull()
+    /** Loads a photo, shrunk if it's very large, so an oversized file can't run the phone out of memory. */
+    fun load(context: Context, name: String): Bitmap? = runCatching {
+        val path = file(context, name).path
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        var sample = 1
+        while (max(bounds.outWidth, bounds.outHeight) / sample > 2 * MAX_SIDE) sample *= 2
+        BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
 
     /**
      * Which picture hides behind this week's wheel: a photo file name, or null for a generated design.

@@ -81,7 +81,8 @@ class PhoneContactsSource(private val context: Context) : ContactSource {
 class DemoContactsSource(private val context: Context) : ContactSource {
 
     override fun load(): List<Contact> {
-        val photo = "android.resource://${context.packageName}/mipmap/ic_launcher"
+        // A plain image file (the app icon itself is a vector drawing, which can't be loaded as a photo).
+        val photo = "android.resource://${context.packageName}/drawable/demo_photo"
         return NAMES.mapIndexed { i, name ->
             val number = "(555) 555-01%02d".format(i + 1)
             val phones = when (i) {

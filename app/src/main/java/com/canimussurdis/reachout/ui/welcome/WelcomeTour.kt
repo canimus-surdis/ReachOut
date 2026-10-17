@@ -1,5 +1,10 @@
 package com.canimussurdis.reachout.ui.welcome
 
+import com.canimussurdis.reachout.ui.common.raised
+import com.canimussurdis.reachout.ui.common.Tone
+import com.canimussurdis.reachout.ui.common.AppIcons
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.Icon
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.LinearEasing
@@ -433,27 +438,39 @@ private fun ActionsArt() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ActionTile("📞", "Call")
-            ActionTile("💬", "Text")
+            ActionTile(AppIcons.Call, "Call", filled = true)
+            ActionTile(AppIcons.Text, "Text")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ActionTile("↗️", "Share")
-            ActionTile("⏰", "Snooze")
+            ActionTile(AppIcons.Share, "Share")
+            ActionTile(AppIcons.Snooze, "Snooze")
         }
     }
 }
 
 @Composable
-private fun ActionTile(emoji: String, label: String) {
+private fun ActionTile(icon: ImageVector, label: String, filled: Boolean = false) {
     Column(
         Modifier
             .width(112.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .padding(vertical = 12.dp, horizontal = 6.dp),
+            .padding(vertical = 6.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(emoji, fontSize = 26.sp)
+        // The same round buttons as the real pick box.
+        Box(
+            Modifier
+                .size(56.dp)
+                .raised(CircleShape, 8.dp, if (filled) Tone.Ink else Tone.Soft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (filled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(22.dp),
+            )
+        }
         Text(
             label,
             style = MaterialTheme.typography.labelLarge,

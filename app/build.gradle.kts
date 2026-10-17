@@ -21,8 +21,10 @@ android {
 
     buildTypes {
         release {
+            // Optimizing (shrinking) the release build broke the app on the phone, so it's off.
+            // The release APK is bigger, but works the same as the debug one.
             optimization {
-                enable = true
+                enable = false
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
             }
         }

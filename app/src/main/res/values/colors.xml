@@ -7,4 +7,16 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Splash screen background (oat, the app's light background). -->
+    <color name="splash_background">#FFF5EFE6</color>
+    <!-- Home screen widgets (they follow the phone's light/dark mode). -->
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_text">#FF17171A</color>
+    <color name="widget_muted">#FF66666D</color>
+    <color name="widget_primary">#FF1D1D20</color>
+    <color name="widget_on_primary">#FFFFFFFF</color>
+    <color name="widget_bg_bottom">#FFF7F7F5</color>
+    <color name="widget_shadow">#1F141418</color>
+    <color name="widget_primary_top">#FF3A3A40</color>
+    <color name="widget_rim">#FFA9A9A4</color>
 </resources>

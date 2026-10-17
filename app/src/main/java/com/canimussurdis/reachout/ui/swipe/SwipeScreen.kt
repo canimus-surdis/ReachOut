@@ -1,5 +1,19 @@
 package com.canimussurdis.reachout.ui.swipe
 
+import com.canimussurdis.reachout.ui.common.raised
+import com.canimussurdis.reachout.ui.common.InkButton
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.offset
+import com.canimussurdis.reachout.ui.common.AppIcons
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,8 +71,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.text.style.TextOverflow
 import com.canimussurdis.reachout.data.Contact
+import com.canimussurdis.reachout.data.KeepFrequency
 import com.canimussurdis.reachout.data.ReachOutRepository
+import com.canimussurdis.reachout.ui.common.FrequencyPicker
+import java.util.Locale
 import com.canimussurdis.reachout.ui.common.AccessoryLook
 import com.canimussurdis.reachout.ui.common.ContactCard
 import com.canimussurdis.reachout.ui.common.MenuButton
@@ -111,8 +129,16 @@ fun SwipeScreen(
     var deck by remember { mutableStateOf<List<Contact>?>(null) }
     LaunchedEffect(canLoad, demoMode, onlyIds, presetDeck) {
         deck = if (presetDeck != null) {
-            val known = repo.knownIds()
-            presetDeck.filter { it.id !in known }.shuffled()
+            // Older saved data may also list people by id only: look those up in your contacts.
+            val byId = if (onlyIds.isNullOrEmpty()) {
+                emptyList()
+            } else {
+                val all = withContext(Dispatchers.IO) { runCatching { repo.loadSwipeDeck() }.getOrDefault(emptyList()) }
+                val wanted = all.filter { it.id in onlyIds }
+                repo.dropReswipe(onlyIds - wanted.map { it.id }.toSet())
+                wanted
+            }
+            repo.undecided((presetDeck + byId).distinctBy { it.id }).shuffled()
         } else if (canLoad) {
             val all = withContext(Dispatchers.IO) { runCatching { repo.loadSwipeDeck() }.getOrDefault(emptyList()) }
             if (onlyIds == null) {
@@ -147,9 +173,12 @@ fun SwipeScreen(
     var swipes by rememberSaveable { mutableIntStateOf(0) }
     var cardWidth by remember { mutableFloatStateOf(1000f) }
     var busy by remember { mutableStateOf(false) }
+    // How often the next person you keep comes up. Back to Surprise me after every swipe.
+    var frequency by rememberSaveable { mutableStateOf(KeepFrequency.SURPRISE) }
 
     fun commit(contact: Contact, keep: Boolean) {
-        if (keep) repo.accept(contact) else repo.reject(contact)
+        if (keep) repo.accept(contact, frequency) else repo.reject(contact)
+        frequency = KeepFrequency.SURPRISE
         deck = deck?.drop(1)
         swipes++
         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -173,27 +202,28 @@ fun SwipeScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(top = 16.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(
-                "Reach Out",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Add people",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                val left = deck?.size ?: 0
+                Text(
+                    when {
+                        !canLoad || left == 0 -> "Keep in touch, or pass"
+                        onlyIds != null && presetDeck == null ->
+                            "You removed ${if (left == 1) "this person" else "these people"}. Keep or pass?"
+                        else -> "Keep or pass · $left to go"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             MenuButton(onClick = onOpenMenu)
-        }
-        if ((onlyIds != null || presetDeck != null) && canLoad && deck?.isNotEmpty() == true) {
-            val who = if (deck?.size == 1) "this person" else "these people"
-            Text(
-                if (presetDeck != null) "Keep or pass on $who you picked. ${deck?.size} to go."
-                else "You removed $who from your list. Keep or pass?",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
         }
 
         // Card area
@@ -228,6 +258,18 @@ fun SwipeScreen(
                     val offset = remember(top.id) { Animatable(0f) }
                     val progress = (offset.value / (cardWidth * 0.3f)).coerceIn(-1f, 1f)
 
+                    // A third card peeks out at the back, for depth.
+                    if (current.size > 2) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 22.dp)
+                                .offset(y = 22.dp)
+                                .graphicsLayer { alpha = 0.85f }
+                                .raised(RoundedCornerShape(26.dp), 6.dp),
+                        )
+                    }
+
                     // The next card waits underneath and grows as you drag.
                     if (next != null) {
                         key(next.id) {
@@ -255,8 +297,14 @@ fun SwipeScreen(
                                 .fillMaxSize()
                                 .onSizeChanged { cardWidth = it.width.toFloat().coerceAtLeast(1f) }
                                 .graphicsLayer {
+                                    // Swings toward you in 3D as you drag it.
+                                    val p = (offset.value / (cardWidth * 0.3f)).coerceIn(-1f, 1f)
                                     translationX = offset.value
                                     rotationZ = offset.value / cardWidth * 12f
+                                    rotationY = p * 14f
+                                    cameraDistance = 14f * density
+                                    scaleX = 1f + abs(p) * 0.03f
+                                    scaleY = 1f + abs(p) * 0.03f
                                 }
                                 .semantics {
                                     customActions = listOf(
@@ -295,6 +343,42 @@ fun SwipeScreen(
             }
         }
 
+        // How often: sits below the card and applies to whoever you keep next.
+        val topCard = if (canLoad) deck?.firstOrNull() else null
+        if (topCard != null) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val firstName = topCard.name.trim().substringBefore(' ').ifBlank { "them" }
+                    Text(
+                        "How often for $firstName".uppercase(Locale.getDefault()),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        frequency.blurb,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                FrequencyPicker(selected = frequency, onSelect = { frequency = it })
+            }
+        }
+
         // Continue appears after 3 swipes (or right away when the deck is empty).
         val deckEmpty = canLoad && deck?.isEmpty() == true
         val showContinue = swipes >= SWIPES_BEFORE_CONTINUE || deckEmpty
@@ -303,38 +387,59 @@ fun SwipeScreen(
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically(),
         ) {
-            Button(
+            InkButton(
                 onClick = onContinue,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Continue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
         }
         if (!showContinue && canLoad && deck?.isNotEmpty() == true) {
-            Text(
-                "Swipe right to keep in touch · left to pass",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
+            // Swipe hints: left to pass, right to keep in touch
+            Row(
+                Modifier
                     .fillMaxWidth()
-                    .height(60.dp)
-                    .padding(top = 18.dp),
-            )
+                    .height(56.dp)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Swipe right to keep in touch, left to pass"
+                    },
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HintChip(AppIcons.ArrowLeft, "Pass", iconFirst = true)
+                HintChip(AppIcons.ArrowRight, "Keep", iconFirst = false)
+            }
         }
         Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
+private fun HintChip(icon: ImageVector, label: String, iconFirst: Boolean) {
+    Row(
+        Modifier
+            .height(38.dp)
+            .raised(CircleShape, 4.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        val tint = MaterialTheme.colorScheme.onSurfaceVariant
+        if (iconFirst) Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = tint)
+        if (!iconFirst) Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+    }
+}
+
+@Composable
 private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTryDemo: () -> Unit) {
     Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        Modifier.fillMaxWidth().raised(RoundedCornerShape(26.dp), 14.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
     ) {
         Column(
             Modifier.padding(24.dp),
@@ -344,7 +449,6 @@ private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTry
             Text(
                 "Let's find your people",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
             Text(
@@ -352,7 +456,7 @@ private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTry
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) { Text("Allow contacts access") }
+            InkButton(onClick = onAllow, modifier = Modifier.fillMaxWidth(), height = 52.dp) { Text("Allow contacts access") }
             TextButton(onClick = onTryDemo) { Text("Try with demo contacts instead") }
             if (showSettingsHint) {
                 Text(
@@ -369,9 +473,12 @@ private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTry
 @Composable
 private fun MessageCard(title: String, body: String) {
     Card(
-        Modifier.fillMaxSize(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        Modifier.fillMaxSize().raised(RoundedCornerShape(26.dp), 14.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
     ) {
         Column(
             Modifier
@@ -382,8 +489,7 @@ private fun MessageCard(title: String, body: String) {
         ) {
             Text(
                 title,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(8.dp))

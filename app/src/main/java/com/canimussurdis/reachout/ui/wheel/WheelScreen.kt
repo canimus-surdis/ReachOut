@@ -1,6 +1,24 @@
 package com.canimussurdis.reachout.ui.wheel
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import com.canimussurdis.reachout.ui.common.raised
+import com.canimussurdis.reachout.ui.common.Tone
+import com.canimussurdis.reachout.ui.common.InkButton
+import kotlin.math.sin
+import kotlin.math.abs
 import android.Manifest
+import com.canimussurdis.reachout.ui.common.phoneLine
+import com.canimussurdis.reachout.ui.common.AppIcons
+import androidx.compose.animation.slideInVertically
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -16,16 +34,17 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,7 +74,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
@@ -78,6 +96,7 @@ import com.canimussurdis.reachout.data.ReachOutRepository
 import com.canimussurdis.reachout.data.ReachedMode
 import com.canimussurdis.reachout.data.SlotState
 import com.canimussurdis.reachout.data.WheelPhotos
+import com.canimussurdis.reachout.data.WheelStyle
 import com.canimussurdis.reachout.ui.common.AccessoryLook
 import com.canimussurdis.reachout.ui.common.ContactPicture
 import com.canimussurdis.reachout.reminders.Reminders
@@ -149,6 +168,16 @@ fun WheelScreen(
         }
     }
 
+    // The pick may have been dealt with outside this screen (for example Call or Text on the
+    // home screen widget). If so, close their box when you come back.
+    LaunchedEffect(dataVersion) {
+        val shown = result
+        if (shown != null && repo.currentPick()?.id != shown.id) {
+            result = null
+            pickSnoozed = false
+        }
+    }
+
     LaunchedEffect(openRequest) {
         val id = openRequest?.contactId ?: return@LaunchedEffect
         repo.contactById(id)?.let {
@@ -213,7 +242,12 @@ fun WheelScreen(
         val count = slots.size
         val target = activeIndexes.random()
         scope.launch {
-            val final = rotationToLandOn(target, count, rotation.value, turns = 5 + Random.nextInt(3))
+            // Same position, smaller number: keeps the landing exact however many times you spin.
+            rotation.snapTo(rotation.value % 360f)
+            val final = rotationToLandOn(
+                target, count, rotation.value, turns = 5 + Random.nextInt(3),
+                centered = settings.wheelStyle == WheelStyle.BIG,
+            )
             if (settings.reduceMotion) {
                 wheelAlpha.animateTo(0.3f, tween(150))
                 rotation.snapTo(final)
@@ -240,6 +274,7 @@ fun WheelScreen(
             resultLook = AccessoryLook.random(avoid = resultLook.accessory)
             result = slots.getOrNull(target)?.contact
             repo.setCurrentPick(result?.id)
+            pickSnoozed = repo.isPickSnoozed() // a new spin always gets its own snooze
             spinning = false
         }
     }
@@ -253,19 +288,19 @@ fun WheelScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(top = 16.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "This week's wheel",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    "This week",
+                    style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 Text(
-                    "New names every ${settings.batchDay.getDisplayName(TextStyle.FULL, Locale.getDefault())}",
-                    style = MaterialTheme.typography.bodySmall,
+                    "New names every ${settings.batchDay.getDisplayName(TextStyle.FULL, Locale.getDefault())}" +
+                        if (slots.isNotEmpty()) " · ${slots.size} on the wheel" else "",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -288,18 +323,24 @@ fun WheelScreen(
                 val pointerColor = MaterialTheme.colorScheme.primary
                 val hubColor = MaterialTheme.colorScheme.surface
                 val segments = slots.map { WheelSegment(it.contact.name, it.state) }
+                // Both styles use the same spin, pick and rules; only the drawing differs.
+                val big = settings.wheelStyle == WheelStyle.BIG
+                val railColor = MaterialTheme.colorScheme.surface
+                val outlineColor = MaterialTheme.colorScheme.outline
+                val pegColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                val backgroundColor = MaterialTheme.colorScheme.background
 
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .aspectRatio(1f),
+                        .then(if (big) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Canvas(
                         Modifier
                             .fillMaxSize()
-                            .padding(top = 18.dp)
-                            .alpha(wheelAlpha.value)
+                            .padding(if (big) PaddingValues(vertical = 8.dp) else PaddingValues(0.dp))
+                            .alpha(wheelAlpha.value * if (result != null) 0.35f else 1f)
                             .semantics {
                                 contentDescription = "Wheel with ${activeIndexes.size} names. Double tap to spin."
                             }
@@ -308,34 +349,49 @@ fun WheelScreen(
                             }
                             .clickable(enabled = !spinning) { spin() },
                     ) {
-                        drawWheel(
-                            segments = segments,
-                            rotation = rotation.value,
-                            dark = dark,
-                            pictureSeed = snap.wheel.drawnAt,
-                            photo = photo,
-                            showWholePicture = reveal && everyoneDone,
-                            textMeasurer = textMeasurer,
-                            textColor = textColor,
-                            coveredColor = covered,
-                        )
-                        // Center hub
-                        drawCircle(hubColor, size.minDimension * 0.09f, center)
-                    }
-                    // Pointer at the top
-                    Canvas(
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .size(width = 34.dp, height = 40.dp),
-                    ) {
-                        val p = Path().apply {
-                            moveTo(0f, 0f)
-                            lineTo(size.width, 0f)
-                            lineTo(size.width / 2f, size.height)
-                            close()
+                        if (big) {
+                            drawBigWheel(
+                                segments = segments,
+                                rotation = rotation.value,
+                                spinning = spinning,
+                                dark = dark,
+                                pictureSeed = snap.wheel.drawnAt,
+                                photo = photo,
+                                showWholePicture = reveal && everyoneDone,
+                                textMeasurer = textMeasurer,
+                                textColor = textColor,
+                                coveredColor = covered,
+                                railColor = railColor,
+                                outlineColor = outlineColor,
+                                pegColor = pegColor,
+                                pointerColor = pointerColor,
+                                backgroundColor = backgroundColor,
+                            )
+                        } else {
+                            // While spinning: lifts toward you, tips forward a little and wobbles.
+                            val turnsPerSecond = if (spinning) abs(rotation.velocity) / 360f else 0f
+                            val lift = minOf(16.dp.toPx(), turnsPerSecond * 4.dp.toPx())
+                            val wobble = sin(rotation.value / 25f) * minOf(2.2f, turnsPerSecond * 0.6f)
+                            val sweep = if (segments.isNotEmpty()) 360f / segments.size else 360f
+                            val frac = ((rotation.value % sweep + sweep) % sweep) / sweep
+                            drawTiltedWheel(
+                                segments = segments,
+                                rotation = rotation.value,
+                                dark = dark,
+                                pictureSeed = snap.wheel.drawnAt,
+                                photo = photo,
+                                showWholePicture = reveal && everyoneDone,
+                                textMeasurer = textMeasurer,
+                                textColor = textColor,
+                                coveredColor = covered,
+                                tiltDeg = WHEEL_TILT - minOf(7f, turnsPerSecond * 2f) + wobble,
+                                lift = lift,
+                                kick = if (spinning) -22f * ((frac - 0.7f) / 0.3f).coerceIn(0f, 1f) else 0f,
+                                hubColor = hubColor,
+                                outlineColor = outlineColor,
+                                pointerColor = pointerColor,
+                            )
                         }
-                        drawPath(p, pointerColor)
-                        drawCircle(hubColor, size.width * 0.14f, Offset(size.width / 2f, size.height * 0.3f))
                     }
                     if (reveal && everyoneDone) {
                         Surface(
@@ -358,8 +414,9 @@ fun WheelScreen(
             // (Full name needed: inside a Box inside a Column, plain AnimatedVisibility is ambiguous.)
             androidx.compose.animation.AnimatedVisibility(
                 visible = result != null,
-                enter = fadeIn() + scaleIn(initialScale = 0.9f),
+                enter = fadeIn() + slideInVertically { it / 4 },
                 exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 val person = result
                 if (person != null) {
@@ -368,16 +425,19 @@ fun WheelScreen(
                         look = resultLook,
                         onCall = {
                             repo.markReachedOut(person.id)
+                            pickSnoozed = false
                             openDialer(context, person.mainNumber)
                             result = null
                         },
                         onText = {
                             repo.markReachedOut(person.id)
+                            pickSnoozed = false
                             openTexting(context, person.mainNumber, settings.message)
                             result = null
                         },
                         onShare = {
                             repo.markReachedOut(person.id)
+                            pickSnoozed = false
                             openShare(context, person.name, settings.message)
                             result = null
                         },
@@ -427,13 +487,10 @@ fun WheelScreen(
 
         // Bottom controls
         if (slots.isNotEmpty() && activeIndexes.isNotEmpty() && result == null && waitingFor == null) {
-            Button(
+            InkButton(
                 onClick = { spin() },
                 enabled = !spinning,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
                     if (spinning) "Spinning…" else "Spin",
@@ -442,7 +499,17 @@ fun WheelScreen(
                 )
             }
         }
-        TextButton(onClick = onAddPeople, modifier = Modifier.fillMaxWidth()) { Text("+ Add more people") }
+        TextButton(
+            onClick = onAddPeople,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+        ) {
+            Icon(AppIcons.Plus, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Add more people", style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp))
+        }
         Spacer(Modifier.height(8.dp))
     }
 
@@ -479,6 +546,7 @@ fun WheelScreen(
                     TextButton(
                         onClick = {
                             repo.skip(snoozed.id)
+                            pickSnoozed = false
                             showSnooze = false
                             result = null
                             localVersion++
@@ -504,82 +572,118 @@ private fun ResultBox(
     canSnooze: Boolean = true,
 ) {
     val hasNumber = contact.mainNumber != null
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp)
+            .raised(RoundedCornerShape(30.dp), 24.dp),
     ) {
+        // Text without its own color uses the card's text color (light text in dark mode).
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
         Column(
-            Modifier.padding(start = 16.dp, end = 16.dp, bottom = 20.dp, top = 4.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                "Your pick",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-            )
-            ContactPicture(
-                contact,
-                look,
+            // A small handle, like a sheet sliding up
+            Box(
                 Modifier
-                    .size(132.dp)
-                    .clip(CircleShape),
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.outline),
             )
-            Spacer(Modifier.height(12.dp))
+            Text(
+                "YOUR PICK",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 18.dp, bottom = 14.dp),
+            )
+            // Their picture in a raised ring
+            Box(
+                Modifier
+                    .size(116.dp)
+                    .raised(CircleShape, 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ContactPicture(
+                    contact,
+                    look,
+                    Modifier
+                        .size(104.dp)
+                        .clip(CircleShape),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
             Text(
                 contact.name,
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(20.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ActionButton("📞", "Call", hasNumber, onCall, Modifier.weight(1f))
-                ActionButton("💬", "Text", hasNumber, onText, Modifier.weight(1f))
-                ActionButton("↗️", "Share", true, onShare, Modifier.weight(1f))
-                ActionButton("⏰", "Snooze", canSnooze, onSnooze, Modifier.weight(1f))
+            Text(
+                contact.phoneLine() ?: "No phone number saved. Try Share instead.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Spacer(Modifier.height(22.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ActionButton(AppIcons.Call, "Call", hasNumber, filled = true, onCall, Modifier.weight(1f))
+                ActionButton(AppIcons.Text, "Text", hasNumber, filled = false, onText, Modifier.weight(1f))
+                ActionButton(AppIcons.Share, "Share", true, filled = false, onShare, Modifier.weight(1f))
+                ActionButton(AppIcons.Snooze, "Snooze", canSnooze, filled = false, onSnooze, Modifier.weight(1f))
             }
             if (!canSnooze) {
-                Spacer(Modifier.height(8.dp))
                 Text(
                     "Snooze already used for this pick.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp),
                 )
             }
-            if (!hasNumber) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "No phone number saved. Try Share instead.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        }
         }
     }
 }
 
+/** A round icon with its label underneath. Call is filled in; the others are soft grey. */
 @Composable
-private fun ActionButton(emoji: String, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = modifier.alpha(if (enabled) 1f else 0.4f),
+private fun ActionButton(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    filled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.38f)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            Modifier.padding(vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Box(
+            Modifier
+                .size(56.dp)
+                .raised(CircleShape, if (enabled) 8.dp else 2.dp, if (filled) Tone.Ink else Tone.Soft),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(emoji, fontSize = 24.sp)
-            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (filled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(22.dp),
+            )
         }
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -589,7 +693,6 @@ private fun EmptyWheel(hasPeople: Boolean, onAddPeople: () -> Unit) {
         Text(
             if (hasPeople) "Everyone's been contacted." else "Your wheel is empty",
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
         Text(
@@ -598,9 +701,14 @@ private fun EmptyWheel(hasPeople: Boolean, onAddPeople: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Button(onClick = onAddPeople) { Text("Add people") }
+        InkButton(onClick = onAddPeople, height = 52.dp) {
+            Text("Add people", style = MaterialTheme.typography.titleMedium)
+        }
     }
 }
+
+/** How far the round wheel leans back, in degrees. */
+private const val WHEEL_TILT = 52f
 
 /** "at 6:15 PM" today, or "tomorrow at 5:00 PM". */
 private fun timeLabel(ms: Long, now: Long = System.currentTimeMillis()): String {

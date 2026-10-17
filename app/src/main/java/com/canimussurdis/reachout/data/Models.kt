@@ -82,6 +82,8 @@ data class Settings(
     val demoTimeOffsetMs: Long = 0L,
     val batchDay: DayOfWeek = DayOfWeek.SUNDAY,
     val wheelSize: Int = 12,
+    /** How the wheel looks. Both styles follow the same rules. */
+    val wheelStyle: WheelStyle = WheelStyle.ROUND,
     val cooldownMinDays: Int = 7,
     val cooldownMaxDays: Int = 182,
     val reachedMode: ReachedMode = ReachedMode.REFILL,
@@ -99,6 +101,8 @@ data class Settings(
     val reminderDay: DayOfWeek = DayOfWeek.SUNDAY,
     /** Monthly: the date each month (1–31; shorter months use their last day). 0 = not chosen yet. */
     val reminderDayOfMonth: Int = 0,
+    /** Daily: the days of the week to remind on (all seven = every day). */
+    val dailyDays: Set<DayOfWeek> = DayOfWeek.entries.toSet(),
     /** Weekly and Every 2 weeks: every day picked here. */
     val reminderDays: Set<DayOfWeek> = setOf(DayOfWeek.SUNDAY),
     /** Yearly: the months to remind in (on the first reminderDay of each). */
@@ -106,6 +110,10 @@ data class Settings(
     /** Reminder window, in minutes after midnight. Default 5–9 pm. */
     val windowStartMin: Int = 17 * 60,
     val windowEndMin: Int = 21 * 60,
+    /** "Different hours on some days": when on, days in [dayWindows] use their own hours. */
+    val perDayWindows: Boolean = false,
+    /** Day → (start, end) in minutes after midnight, for days with their own hours. Other days use the usual window. */
+    val dayWindows: Map<DayOfWeek, Pair<Int, Int>> = emptyMap(),
     val lastReminderAt: Long? = null,
     val nextReminderAt: Long? = null,
     /** Contact id → when its 1-hour snooze reminder is due. */
@@ -126,6 +134,10 @@ data class Settings(
     /** File names of your own photos, stored in the app's private folder. */
     val wheelPhotos: List<String> = emptyList(),
 ) {
+    /** The reminder hours for [day]: its own hours if it has them, otherwise the usual window. */
+    fun windowFor(day: DayOfWeek): Pair<Int, Int> =
+        (if (perDayWindows) dayWindows[day] else null) ?: (windowStartMin to windowEndMin)
+
     companion object {
         /** The Blank preset: Text and Share open with nothing typed. */
         const val BLANK_MESSAGE = ""
@@ -152,11 +164,35 @@ enum class ThemeMode(val label: String) { SYSTEM("Follow phone"), LIGHT("Light")
 /** The app's color palettes (each has a light and a dark version). Colors live in ui/theme/Theme.kt. */
 enum class ColorPalette(val label: String, val blurb: String) {
     TERRACOTTA("Terracotta", "Warm clay and sage"),
+    NEUTRAL("Neutral", "Soft greys and charcoal"),
     OCEAN("Ocean", "Calm teal and sea glass"),
     LAVENDER("Lavender", "Soft purple and mint"),
     FOREST("Forest", "Leafy green and moss"),
     SUNSHINE("Sunshine", "Golden honey and leaf"),
 }
+
+/**
+ * How often someone comes up, chosen below the card when you keep them.
+ * Each choice is just that person's break length after you connect ([ContactRecord.customMinDays]
+ * to [ContactRecord.customMaxDays]). SURPRISE has no range of its own: it uses the usual break in
+ * Settings → Wheel.
+ */
+enum class KeepFrequency(val label: String, val blurb: String, val minDays: Int?, val maxDays: Int?) {
+    WEEKLY("Weekly", "About every week", 7, 7),
+    MONTHLY("Monthly", "About once a month", 28, 35),
+    FEW_MONTHS("Few months", "Every 2 to 4 months", 61, 122),
+    SURPRISE("Surprise me", "Your usual range", null, null);
+
+    companion object {
+        /** The choice a break length matches, or null if it's an exact custom length set in Settings. */
+        fun of(minDays: Int?, maxDays: Int?): KeepFrequency? =
+            if (minDays == null || maxDays == null) SURPRISE
+            else entries.firstOrNull { it.minDays == minDays && it.maxDays == maxDays }
+    }
+}
+
+/** ROUND: the classic prize wheel. BIG: a tall wheel that rolls downward, like the one on The Price is Right. */
+enum class WheelStyle(val label: String) { ROUND("Round wheel"), BIG("Big wheel") }
 
 enum class PictureSource(val label: String) { DESIGNS("Designs"), PHOTOS("My photos"), MIX("Mix") }
 
@@ -178,6 +214,11 @@ class AppState(
     var pickSnoozed: Boolean = false,
     /** People you removed (or restored from Passed): swipe on them again the next time the app opens. */
     val reswipe: LinkedHashSet<String> = linkedSetOf(),
+    /**
+     * People waiting to be swiped on (picked in Import contacts, removed from your list, restored or
+     * un-ignored), kept with their details so file contacts work too. The app opens on their cards.
+     */
+    val pendingSwipe: LinkedHashMap<String, Contact> = linkedMapOf(),
 )
 
 // ---- Read-only views handed to the screens ----

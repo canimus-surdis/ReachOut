@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tells Android about the "Who's up + Call/Text" widget: a slim one-row strip, 3 cells wide by default. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_call_description"
+    android:initialLayout="@layout/widget_call_text"
+    android:minWidth="200dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="150dp"
+    android:minResizeHeight="40dp"
+    android:previewLayout="@layout/widget_call_text"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="3"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.ReachOut" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.ReachOut" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Splash screen when the app opens: the wheel on the app's background color. -->
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <!-- Same color behind the app while it loads, so there's no white flash. -->
+        <item name="android:windowBackground">@color/splash_background</item>
+    </style>
 </resources>

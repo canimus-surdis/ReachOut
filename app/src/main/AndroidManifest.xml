@@ -32,6 +32,40 @@
             </intent-filter>
         </activity>
 
+        <!-- Home screen widgets. Android sends them updates; other apps can't. -->
+        <receiver
+            android:name=".widget.PickWidget"
+            android:exported="false"
+            android:label="@string/widget_pick_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_pick_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.CallTextWidget"
+            android:exported="false"
+            android:label="@string/widget_call_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_call_info" />
+        </receiver>
+
+        <!-- Invisible: runs for a moment when Call or Text is tapped on the widget, then closes. -->
+        <activity
+            android:name=".widget.WidgetActionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <receiver
             android:name=".reminders.ReminderReceiver"
             android:exported="false">

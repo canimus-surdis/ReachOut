@@ -105,6 +105,28 @@ object Reminders {
             ?.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, realAt, snoozeIntent(context, contactId))
     }
 
+    /**
+     * These people were dealt with or left the wheel (reached out, Not yet, Back to pool, removed, ignored):
+     * cancel their snooze reminders and clear their notifications, so nothing nudges you about them
+     * until they're picked on the wheel again.
+     */
+    fun clearFor(context: Context, ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val repo = ReachOutRepository.get(context)
+        val gone = ids.toSet()
+        if (repo.settings.snoozes.keys.any { it in gone }) {
+            repo.changeSettings { it.copy(snoozes = it.snoozes - gone) }
+        }
+        val alarms = context.getSystemService(AlarmManager::class.java)
+        val shown = NotificationManagerCompat.from(context)
+        gone.forEach { id ->
+            alarms?.cancel(snoozeIntent(context, id))
+            shown.cancel(snoozeRequestCode(id))
+        }
+        // A reminder already showing may name them, so clear it too. The next one comes as planned.
+        shown.cancel(REGULAR_ID)
+    }
+
     /** How far the app's clock is ahead of the real one (only in demo mode, after time travel). */
     private fun clockOffset(s: Settings): Long = if (s.demoMode) s.demoTimeOffsetMs else 0L
 
@@ -118,7 +140,6 @@ object Reminders {
         val now = Instant.ofEpochMilli(nowMs).atZone(zone)
         val today = now.toLocalDate()
         val nowMin = now.hour * 60 + now.minute
-        val (startMin, endMin) = window(s)
         val last = s.lastReminderAt?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
         val days = s.reminderDays.ifEmpty { setOf(s.reminderDay) }
         val months = s.reminderMonths
@@ -135,7 +156,7 @@ object Reminders {
         // Every 2 weeks: on-weeks alternate, counting from the week of the last reminder.
         val anchorWeek = weekStart(last ?: today)
         fun allowed(d: LocalDate): Boolean = when (s.reminderFrequency) {
-            ReminderFrequency.DAILY -> true
+            ReminderFrequency.DAILY -> s.dailyDays.isEmpty() || d.dayOfWeek in s.dailyDays
             ReminderFrequency.WEEKLY -> d.dayOfWeek in days
             ReminderFrequency.BIWEEKLY ->
                 d.dayOfWeek in days && ChronoUnit.WEEKS.between(anchorWeek, weekStart(d)) % 2 == 0L
@@ -151,6 +172,8 @@ object Reminders {
         }
 
         repeat(800) {
+            // Each day can have its own hours (Settings → Reminders → Different hours on some days).
+            val (startMin, endMin) = window(s, date.dayOfWeek)
             val windowOverToday = date == today && nowMin >= endMin - 1
             if (allowed(date) && !windowOverToday) {
                 val fromMin = if (date == today) maxOf(startMin, nowMin + 2) else startMin
@@ -168,18 +191,23 @@ object Reminders {
     fun fitIntoWindow(timeMs: Long, s: Settings): Long {
         val zone = ZoneId.systemDefault()
         val t: ZonedDateTime = Instant.ofEpochMilli(timeMs).atZone(zone)
-        val (startMin, endMin) = window(s)
+        val (startMin, endMin) = window(s, t.dayOfWeek)
         val minute = t.hour * 60 + t.minute
         return when {
             minute < startMin -> at(t.toLocalDate(), startMin, zone)
-            minute >= endMin -> at(t.toLocalDate().plusDays(1), startMin, zone)
+            minute >= endMin -> {
+                val tomorrow = t.toLocalDate().plusDays(1)
+                at(tomorrow, window(s, tomorrow.dayOfWeek).first, zone)
+            }
             else -> timeMs
         }
     }
 
-    private fun window(s: Settings): Pair<Int, Int> {
-        val start = s.windowStartMin.coerceIn(0, 23 * 60)
-        val end = s.windowEndMin.coerceIn(start + 30, 24 * 60 - 1)
+    /** The reminder hours on [day] (its own, or the usual window), kept sensible. */
+    private fun window(s: Settings, day: DayOfWeek): Pair<Int, Int> {
+        val (a, b) = s.windowFor(day)
+        val start = a.coerceIn(0, 23 * 60)
+        val end = b.coerceIn(start + 30, 24 * 60 - 1)
         return start to end
     }
 
@@ -216,6 +244,19 @@ object Reminders {
     fun showRegularNow(context: Context) = postRegular(context)
 
     private fun postRegular(context: Context) {
+        // Someone was snoozed and is still waiting: name them instead of the usual nudge.
+        val repo = ReachOutRepository.get(context)
+        val waiting = if (repo.isPickSnoozed()) repo.currentPick() else null
+        if (waiting != null) {
+            post(
+                context,
+                id = REGULAR_ID,
+                title = "Reminder: reach out to ${waiting.name}",
+                text = "Tap to call, text or share.",
+                open = waiting.id,
+            )
+            return
+        }
         post(
             context,
             id = REGULAR_ID,
@@ -255,6 +296,7 @@ object Reminders {
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
+            .setColor(0xFFB95C40.toInt()) // terracotta, to match the app
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(tap)

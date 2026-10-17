@@ -1,1 +1,4 @@
 /build
+# Built app files (APK/AAB) made by Android Studio
+/debug
+/release

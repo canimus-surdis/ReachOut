@@ -1,8 +1,9 @@
 package com.canimussurdis.reachout.ui.common
 
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
-import androidx.compose.foundation.Canvas
+import android.provider.ContactsContract
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,11 +12,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,20 +23,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.canimussurdis.reachout.data.Contact
 import kotlinx.coroutines.Dispatchers
@@ -55,27 +50,41 @@ fun ContactCard(
     swipeProgress: Float = 0f,
 ) {
     Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        modifier = modifier.raised(RoundedCornerShape(26.dp), 18.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 ContactPicture(contact, look, Modifier.fillMaxWidth().weight(1f))
-                Text(
-                    text = contact.name,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
-                    style = MaterialTheme.typography.displaySmall.copy(
-                        fontSize = nameSize(contact.name),
-                        lineHeight = nameSize(contact.name) * 1.15f,
-                    ),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 22.dp),
+                ) {
+                    Text(
+                        text = contact.name,
+                        style = MaterialTheme.typography.displaySmall.copy(
+                            fontSize = nameSize(contact.name),
+                            lineHeight = nameSize(contact.name) * 1.2f,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    contact.phoneLine()?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
             }
             if (swipeProgress > 0.05f) {
                 Stamp("KEEP", MaterialTheme.colorScheme.tertiary, swipeProgress, -12f, Modifier.align(Alignment.TopStart))
@@ -88,9 +97,9 @@ fun ContactCard(
 }
 
 private fun nameSize(name: String) = when {
-    name.length <= 14 -> 44.sp
-    name.length <= 24 -> 36.sp
-    else -> 28.sp
+    name.length <= 14 -> 30.sp
+    name.length <= 24 -> 26.sp
+    else -> 22.sp
 }
 
 @Composable
@@ -98,17 +107,18 @@ private fun Stamp(text: String, color: Color, progress: Float, angle: Float, mod
     Text(
         text = text,
         modifier = modifier
-            .padding(24.dp)
+            .padding(18.dp)
             .graphicsLayer {
                 alpha = progress.coerceIn(0f, 1f)
-                rotationZ = angle
+                rotationZ = angle / 3f
             }
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(10.dp))
-            .border(3.dp, color, RoundedCornerShape(10.dp))
-            .padding(horizontal = 14.dp, vertical = 4.dp),
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
+            .border(1.5.dp, color, RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         color = color,
-        fontSize = 30.sp,
-        fontWeight = FontWeight.Black,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.1.em,
     )
 }
 
@@ -145,9 +155,14 @@ private fun rememberContactPhoto(uri: String?): State<PhotoState> {
             value = PhotoState.None
             return@produceState
         }
+        val parsed = Uri.parse(uri)
+        if (!isTrustedPhoto(context, parsed)) {
+            value = PhotoState.None
+            return@produceState
+        }
         val bitmap = withContext(Dispatchers.IO) {
             runCatching {
-                context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
+                context.contentResolver.openInputStream(parsed)?.use { stream ->
                     BitmapFactory.decodeStream(stream)?.asImageBitmap()
                 }
             }.getOrNull()
@@ -156,17 +171,12 @@ private fun rememberContactPhoto(uri: String?): State<PhotoState> {
     }
 }
 
-/** The ☰ button that opens Settings. Drawn by hand so no icon library is needed. */
-@Composable
-fun MenuButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val color = MaterialTheme.colorScheme.onBackground
-    IconButton(onClick = onClick, modifier = modifier.semantics { contentDescription = "Menu" }) {
-        Canvas(Modifier.size(24.dp)) {
-            val stroke = 2.5.dp.toPx()
-            for (i in 0..2) {
-                val y = size.height * (0.25f + i * 0.25f)
-                drawLine(color, Offset(size.width * 0.1f, y), Offset(size.width * 0.9f, y), stroke, StrokeCap.Round)
-            }
-        }
-    }
+/**
+ * Photos only ever come from the phone's contacts or the app's own demo picture. A photo link from
+ * anywhere else (for example a tampered backup pointing at another app's files) is ignored.
+ */
+private fun isTrustedPhoto(context: Context, uri: Uri): Boolean = when (uri.scheme) {
+    "content" -> uri.authority == ContactsContract.AUTHORITY
+    "android.resource" -> uri.authority == context.packageName
+    else -> false
 }

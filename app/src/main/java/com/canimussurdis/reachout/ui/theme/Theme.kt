@@ -1,12 +1,15 @@
 package com.canimussurdis.reachout.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import com.canimussurdis.reachout.data.ColorPalette
 
 /** The handful of colors each palette sets; everything else is worked out from these. */
@@ -27,8 +30,27 @@ private class Tones(
 
 /** Each palette as (light, dark). All button and text colors meet accessible contrast. */
 private val PALETTES: Map<ColorPalette, Pair<Tones, Tones>> = mapOf(
+    ColorPalette.NEUTRAL to Pair(
+        // Soft greys with near-black buttons
+        Tones(
+        background = Color(0xFFF5F5F3), surface = Color(0xFFFFFFFF),
+        variant = Color(0xFFEDEDEA), highest = Color(0xFFEDEDEA),
+        text = Color(0xFF17171A), muted = Color(0xFF66666D),
+        primary = Color(0xFF1D1D20), onPrimary = Color(0xFFFFFFFF),
+        tertiary = Color(0xFF4F7A62), onTertiary = Color(0xFFFFFFFF),
+        outline = Color(0xFFE2E2DE), error = Color(0xFFA8433A),
+    ),
+        Tones(
+        background = Color(0xFF111113), surface = Color(0xFF1B1B1E),
+        variant = Color(0xFF26262A), highest = Color(0xFF26262A),
+        text = Color(0xFFF1F1F3), muted = Color(0xFFA0A0A8),
+        primary = Color(0xFFF1F1F3), onPrimary = Color(0xFF111113),
+        tertiary = Color(0xFF8FBF9F), onTertiary = Color(0xFF0F2418),
+        outline = Color(0xFF2E2E33), error = Color(0xFFF2A29E),
+    ),
+    ),
     ColorPalette.TERRACOTTA to Pair(
-        // Warm clay and sage (the original)
+        // Warm clay and sage (the default)
         Tones(
         background = Color(0xFFF5EFE6), surface = Color(0xFFFFFDF9),
         variant = Color(0xFFEDE4D8), highest = Color(0xFFEFE7DC),
@@ -172,6 +194,16 @@ fun ReachOutTheme(
     MaterialTheme(
         colorScheme = tonesFor(palette, darkTheme).scheme(darkTheme),
         typography = Typography,
+        shapes = AppShapes,
         content = content,
     )
 }
+
+/** One set of rounded corners used everywhere, so cards, dialogs and fields match. */
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)

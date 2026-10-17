@@ -46,13 +46,21 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem(
                 "Add people",
                 "The app opens on the wheel. Tap Add people (or + Add more people) whenever you like and choose how: " +
-                    "Add all contacts (swipe through them one by one), or Pick from a list or a file. Your contacts are only read " +
-                    "when you choose.",
+                    "Add all contacts (swipe through them one by one), or Pick from a list or a file. If anyone is waiting " +
+                    "to be swiped on, Swipe (N waiting) shows just them. Your contacts are only read when you choose.",
             ),
             GuideItem(
                 "Swipe",
                 "Swipe right to keep someone on your list, or left to pass. A Continue button appears after 3 swipes, " +
                     "but you can keep swiping as long as you like. Back returns to the wheel.",
+            ),
+            GuideItem(
+                "How often",
+                "Below each card are four choices for how often that person comes up: Weekly (about every week), " +
+                    "Monthly (about once a month), Few months (every 2 to 4 months) or Surprise me (your usual break from " +
+                    "Wheel → Break after you connect). It starts on Surprise me and goes back to it after every swipe, " +
+                    "so only the person you keep gets your choice. Passing ignores it. Change it later in Contacts, where " +
+                    "there's also a Custom choice for exact days.",
             ),
             GuideItem(
                 "The wheel",
@@ -97,9 +105,11 @@ internal val GUIDE: List<GuideSection> = listOf(
             ),
             GuideItem(
                 "On your list",
-                "Everyone you kept. Anyone with their own break shows it underneath, for example \"Break: 2 weeks – 1 month\". " +
-                    "Remove takes someone off your list and the wheel. The next time you open the app, you'll swipe on them " +
-                    "again to keep or pass.",
+                "Everyone you kept, with how often each one comes up (Weekly, Monthly, 2–4 months, Surprise or Custom). " +
+                    "Tap someone to change it. Custom is only here, not on the swipe screen: choose it, then set Shortest " +
+                    "and Longest for that person (the app picks a random break between them each time you connect). " +
+                    "Remove from list takes someone off your list and the wheel. The next time you open the app, you'll " +
+                    "swipe on them again to keep or pass.",
             ),
             GuideItem(
                 "Passed",
@@ -107,9 +117,16 @@ internal val GUIDE: List<GuideSection> = listOf(
                     "on them again.",
             ),
             GuideItem(
+                "Remove several from your list",
+                "Tick as many people as you like (Search and Select all help), then tap Remove. You'll be asked " +
+                    "\"Are you sure?\" first. They come off your list and the wheel, and you'll swipe on them again " +
+                    "the next time you open the app.",
+            ),
+            GuideItem(
                 "Ignore contacts",
                 "Tick people you never want to see as swipe cards, such as businesses or old numbers. They're also " +
-                    "left out of imports. Anyone on your list comes off it. Swiping itself doesn't change.",
+                    "left out of imports. Anyone on your list comes off it. You'll be asked \"Are you sure?\" first. " +
+                    "Swiping itself doesn't change.",
             ),
             GuideItem(
                 "Ignored",
@@ -127,7 +144,8 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem(
                 "Pick several at once",
                 "Tick people from your phone's contacts, then tap Swipe on. Their swipe cards open next, so you keep or " +
-                    "pass on each one, then you're back at the wheel. Search, Select all and Clear help with long lists.",
+                    "pass on each one, then you're back at the wheel. Anyone you don't get to stays waiting: the app opens on " +
+                    "their cards next time (after any picked person on the wheel). Search, Select all and Clear help with long lists.",
             ),
             GuideItem(
                 "Add everyone",
@@ -171,10 +189,19 @@ internal val GUIDE: List<GuideSection> = listOf(
     ),
     GuideSection(
         title = "Wheel",
-        summary = "When names change, break lengths, and what happens after each pick",
+        summary = "How the wheel looks, when names change, break lengths, and what happens after each pick",
         target = GuideTarget.WHEEL,
         buttonLabel = "Open Wheel",
         items = listOf(
+            GuideItem(
+                "Wheel style",
+                "Round wheel (the default) is a prize wheel tilted back like it's on a table; the name under the pointer " +
+                    "at the top is the pick. " +
+                    "Big wheel is a tall wheel that rolls downward, like on a TV game show: names run across it, and the " +
+                    "one between the two pointers is the pick. Tap it, swipe it or press Spin. Both work exactly the same " +
+                    "way: the same names, Snooze, reminders and choices below. With Reveal picture, the Big Wheel's " +
+                    "uncovered names show the hidden picture behind it.",
+            ),
             GuideItem(
                 "New names each week on",
                 "The day a fresh set of up to 12 names is drawn. The default is Sunday. If the wheel empties before then, " +
@@ -183,8 +210,8 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem(
                 "Break after you connect",
                 "After you answer Yes, that person rests for a random time between Shortest and Longest before they can " +
-                    "come up again. The default is 1 week to 6 months. Change it for some people with Contacts → " +
-                    "Custom break lengths.",
+                    "come up again. The default is 1 week to 6 months. This is what Surprise me uses. Change it for some " +
+                    "people with How often when you keep them, or in Contacts.",
             ),
             GuideItem(
                 "When you reach someone",
@@ -219,8 +246,9 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem("How often", "Daily (the default), Weekly, Every 2 weeks, Monthly or Yearly."),
             GuideItem(
                 "On these days",
-                "Weekly and Every 2 weeks: tap as many days as you like. You'll get a nudge on each one (every other " +
-                    "week for Every 2 weeks). At least one day stays picked.",
+                "Daily: all seven days are on to start with. Tap a day to skip it (for example, weekends). " +
+                    "Weekly and Every 2 weeks: tap as many days as you like. You'll get a nudge on each one (every other " +
+                    "week for Every 2 weeks). At least one day always stays picked.",
             ),
             GuideItem(
                 "In these months",
@@ -241,6 +269,12 @@ internal val GUIDE: List<GuideSection> = listOf(
                 "The hours a reminder can arrive. Tap From or Until and type a time; the window must be at least an hour long. The default is " +
                     "5 pm to 9 pm. Each reminder lands at a random time inside it. 1-hour snoozes also wait for this window.",
             ),
+            GuideItem(
+                "Different hours on some days",
+                "Turn this on to give some days their own hours, for example a later start on weekends. Each day " +
+                    "of the week is listed: tap its From or Until to change it, and Use usual hours to undo. Days you " +
+                    "leave alone keep your usual hours. Snoozes wait for that day's hours too.",
+            ),
             GuideItem("Next reminder", "When the next nudge is planned."),
             GuideItem(
                 "Battery tip",
@@ -257,8 +291,8 @@ internal val GUIDE: List<GuideSection> = listOf(
         items = listOf(
             GuideItem(
                 "Messages",
-                "Blank plus five ready-made messages. Tap one to use it for Text and Share. The default is Blank, which " +
-                    "opens Text and Share with nothing typed, so you write your own each time.",
+                "Blank plus five ready-made messages. Tap one to use it for Text and Share (and Text on the home screen " +
+                    "widget). The default is Blank, which opens them with nothing typed, so you write your own each time.",
             ),
             GuideItem(
                 "Your own",
@@ -280,7 +314,8 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem("Theme", "Follow phone matches your phone's light or dark mode. Light and Dark keep it one way."),
             GuideItem(
                 "Color palette",
-                "Terracotta, Ocean, Lavender, Forest or Sunshine. Each has a light and a dark version, so it works with " +
+                "Terracotta (the default), Neutral, Ocean, Lavender, Forest or Sunshine. " +
+                    "Each has a light and a dark version, so it works with " +
                     "any Theme choice. The three dots show the background, button and accent colors.",
             ),
             GuideItem(
@@ -359,6 +394,34 @@ internal val GUIDE: List<GuideSection> = listOf(
         ),
     ),
     GuideSection(
+        title = "Home screen widgets",
+        summary = "See who's up without opening the app",
+        items = listOf(
+            GuideItem(
+                "Adding a widget",
+                "Press and hold an empty spot on your home screen, tap Widgets, find Reach Out, then drag the one " +
+                    "you want onto your home screen. You can resize it by pressing and holding it.",
+            ),
+            GuideItem(
+                "Who's up",
+                "Shows who the wheel picked. Tap it to open their box (Call, Text, Share, Snooze). With nobody picked, " +
+                    "it says Time to say hi, and Spin the wheel opens the app on the wheel.",
+            ),
+            GuideItem(
+                "Who's up + Call/Text",
+                "The same, with Call and Text buttons right on the widget. Text fills in the same message as Text in " +
+                    "the app (Blank by default). " +
+                    "Tapping either counts as reaching out, just like in the app: the app asks \"Did you connect?\" " +
+                    "next time you open it.",
+            ),
+            GuideItem(
+                "Privacy",
+                "Widgets show the picked person's name on your home screen. They never read your contacts. " +
+                    "To keep names off the home screen, just don't add a widget.",
+            ),
+        ),
+    ),
+    GuideSection(
         title = "Privacy & permissions",
         summary = "What the app can and can't do",
         items = listOf(
@@ -374,8 +437,8 @@ internal val GUIDE: List<GuideSection> = listOf(
             ),
             GuideItem(
                 "Your data",
-                "Everything stays inside the app on your phone. Call, Text and Share open your own apps, " +
-                    "and nothing is sent unless you send it.",
+                "Everything stays inside the app on your phone (and in your phone's own encrypted Google backup, " +
+                    "if that's on). Call, Text and Share open your own apps, and nothing is sent unless you send it.",
             ),
         ),
     ),

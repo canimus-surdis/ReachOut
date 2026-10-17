@@ -22,8 +22,9 @@ object Backup {
 
     private const val INFO = "reachout-backup.json"
     private const val PHOTO_DIR = "wheel_photos/"
-    private val SAFE_PHOTO_NAME = Regex("""photo_[A-Za-z0-9-]+\.jpg""")
     private const val MAX_ENTRY_BYTES = 25L * 1024 * 1024
+    private const val MAX_TOTAL_BYTES = 300L * 1024 * 1024
+    private const val MAX_PHOTOS = 200
 
     data class Summary(val people: Int, val photos: Int)
 
@@ -77,14 +78,22 @@ object Backup {
      */
     fun read(input: InputStream): Contents {
         val entries = HashMap<String, ByteArray>()
+        var total = 0L
+        var photoCount = 0
         ZipInputStream(input).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 val name = entry.name
+                val isPhoto = name.startsWith(PHOTO_DIR) && WheelPhotos.isSafeName(name.removePrefix(PHOTO_DIR))
                 val allowed = name == INFO || name == ReachOutRepository.SETTINGS_FILE ||
-                    name == ReachOutRepository.STATE_FILE ||
-                    (name.startsWith(PHOTO_DIR) && SAFE_PHOTO_NAME.matches(name.removePrefix(PHOTO_DIR)))
-                if (allowed && !entry.isDirectory) entries[name] = readLimited(zip)
+                    name == ReachOutRepository.STATE_FILE || isPhoto
+                if (allowed && !entry.isDirectory && name !in entries) {
+                    if (isPhoto && ++photoCount > MAX_PHOTOS) throw IllegalArgumentException("That backup has too many photos.")
+                    val bytes = readLimited(zip)
+                    total += bytes.size
+                    if (total > MAX_TOTAL_BYTES) throw IllegalArgumentException("That backup file is too large.")
+                    entries[name] = bytes
+                }
                 zip.closeEntry()
             }
         }
@@ -112,11 +121,14 @@ object Backup {
         // Photos first, then keep only the photo names that actually arrived.
         contents.photos.forEach { (name, bytes) -> WheelPhotos.file(context, name).writeBytes(bytes) }
         val listed = contents.settings.optJSONArray("wheelPhotos") ?: JSONArray()
-        val kept = (0 until listed.length()).map { listed.getString(it) }
-            .filter { WheelPhotos.file(context, it).exists() }
+        val kept = (0 until listed.length()).map { listed.optString(it) }
+            .filter { WheelPhotos.isSafeName(it) && WheelPhotos.file(context, it).exists() }
         contents.settings.put("wheelPhotos", JSONArray(kept))
         contents.settings.put("demoMode", false)
         contents.settings.put("demoTimeOffsetMs", 0)
+        // Reminders are planned fresh for this phone, never taken from the file.
+        contents.settings.remove("snoozes")
+        contents.settings.remove("nextReminderAt")
 
         writeAtomically(repo.dataFile(ReachOutRepository.STATE_FILE), contents.state.toString())
         writeAtomically(repo.dataFile(ReachOutRepository.SETTINGS_FILE), contents.settings.toString())

@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">Reach Out</string>
+
+    <!-- Home screen widgets: names and descriptions in the phone's widget list -->
+    <string name="widget_pick_label">Who\'s up</string>
+    <string name="widget_pick_description">Shows who the wheel picked. Tap to open their box, or to spin.</string>
+    <string name="widget_call_label">Who\'s up + Call/Text</string>
+    <string name="widget_call_description">Shows who the wheel picked, with Call and Text buttons.</string>
 </resources>

@@ -1,5 +1,7 @@
 package com.canimussurdis.reachout.ui.inspector
 
+import com.canimussurdis.reachout.ui.common.CircleIconButton
+import com.canimussurdis.reachout.ui.common.AppIcons
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -99,11 +101,11 @@ fun DataInspectorScreen(repo: ReachOutRepository, onBack: () -> Unit, modifier: 
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            TextButton(onClick = onBack) { Text("‹ Back") }
-            Text("Test tools", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            CircleIconButton(AppIcons.Back, "Back", onClick = onBack)
             Text(
-                "Until the wheel and Settings are built, this is where Continue and ☰ lead.",
-                style = MaterialTheme.typography.bodyMedium,
+                "Test tools",
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.padding(start = 4.dp, top = 12.dp),
             )
         }
 

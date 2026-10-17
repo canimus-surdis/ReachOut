@@ -19,9 +19,11 @@ internal object Storage {
             demoMode = o.optBoolean("demoMode", d.demoMode),
             demoTimeOffsetMs = o.optLong("demoTimeOffsetMs", d.demoTimeOffsetMs),
             batchDay = enumOr(o.optString("batchDay"), d.batchDay),
-            wheelSize = o.optInt("wheelSize", d.wheelSize),
-            cooldownMinDays = o.optInt("cooldownMinDays", d.cooldownMinDays),
-            cooldownMaxDays = o.optInt("cooldownMaxDays", d.cooldownMaxDays),
+            // Values are kept within sensible ranges, so a damaged or tampered file can't break the app.
+            wheelSize = o.optInt("wheelSize", d.wheelSize).coerceIn(1, 30),
+            wheelStyle = enumOr(o.optString("wheelStyle"), d.wheelStyle),
+            cooldownMinDays = o.optInt("cooldownMinDays", d.cooldownMinDays).coerceIn(0, 3650),
+            cooldownMaxDays = o.optInt("cooldownMaxDays", d.cooldownMaxDays).coerceIn(0, 3650),
             reachedMode = enumOr(o.optString("reachedMode"), d.reachedMode),
             notYetMode = enumOr(o.optString("notYetMode"), d.notYetMode),
             message = readMessage(o, d),
@@ -35,11 +37,17 @@ internal object Storage {
             reminderDays = strings(o.optJSONArray("reminderDays"))
                 .mapNotNull { runCatching { java.time.DayOfWeek.valueOf(it) }.getOrNull() }.toSet()
                 .ifEmpty { setOf(enumOr(o.optString("reminderDay"), d.reminderDay)) },
+            // Daily: every day unless some were turned off.
+            dailyDays = strings(o.optJSONArray("dailyDays"))
+                .mapNotNull { runCatching { java.time.DayOfWeek.valueOf(it) }.getOrNull() }.toSet()
+                .ifEmpty { d.dailyDays },
             reminderDayOfMonth = o.optInt("reminderDayOfMonth", d.reminderDayOfMonth).coerceIn(0, 31),
             reminderMonths = strings(o.optJSONArray("reminderMonths"))
                 .mapNotNull { runCatching { java.time.Month.valueOf(it) }.getOrNull() }.toSet(),
-            windowStartMin = o.optInt("windowStartMin", d.windowStartMin),
-            windowEndMin = o.optInt("windowEndMin", d.windowEndMin),
+            windowStartMin = o.optInt("windowStartMin", d.windowStartMin).coerceIn(0, 24 * 60 - 1),
+            windowEndMin = o.optInt("windowEndMin", d.windowEndMin).coerceIn(0, 24 * 60 - 1),
+            perDayWindows = o.optBoolean("perDayWindows", d.perDayWindows),
+            dayWindows = readDayWindows(o.optJSONObject("dayWindows")),
             lastReminderAt = if (o.has("lastReminderAt")) o.getLong("lastReminderAt") else null,
             nextReminderAt = if (o.has("nextReminderAt")) o.getLong("nextReminderAt") else null,
             snoozes = o.optJSONObject("snoozes")?.let { s ->
@@ -47,11 +55,12 @@ internal object Storage {
             } ?: emptyMap(),
             askedNotificationPermission = o.optBoolean("askedNotificationPermission", d.askedNotificationPermission),
             themeMode = enumOr(o.optString("themeMode"), d.themeMode),
-            textScale = o.optDouble("textScale", d.textScale.toDouble()).toFloat(),
-            palette = enumOr(o.optString("palette"), d.palette),
+            textScale = o.optDouble("textScale", d.textScale.toDouble()).toFloat().let { if (it.isNaN()) 1f else it.coerceIn(0.8f, 1.6f) },
+            palette = readPalette(o, d),
             customMessages = strings(o.optJSONArray("customMessages")),
             pictureSource = enumOr(o.optString("pictureSource"), d.pictureSource),
-            wheelPhotos = strings(o.optJSONArray("wheelPhotos")),
+            // Only names the app itself makes (a tampered file can't point outside the photos folder).
+            wheelPhotos = strings(o.optJSONArray("wheelPhotos")).filter { WheelPhotos.isSafeName(it) },
         )
     }
 
@@ -64,6 +73,25 @@ internal object Storage {
         val old = o.optInt("messagesVersion", 1) < MESSAGES_VERSION
         return if (old && stored in OLD_DEFAULT_MESSAGES) Settings.BLANK_MESSAGE else stored
     }
+
+    private const val PALETTE_VERSION = 2
+
+    /** {"SATURDAY": [540, 1260], …} → each day's own reminder hours (anything damaged is skipped). */
+    private fun readDayWindows(o: JSONObject?): Map<java.time.DayOfWeek, Pair<Int, Int>> {
+        if (o == null) return emptyMap()
+        val out = HashMap<java.time.DayOfWeek, Pair<Int, Int>>()
+        for (key in o.keys()) {
+            val day = runCatching { java.time.DayOfWeek.valueOf(key) }.getOrNull() ?: continue
+            val a = o.optJSONArray(key) ?: continue
+            if (a.length() < 2) continue
+            out[day] = a.optInt(0).coerceIn(0, 24 * 60 - 1) to a.optInt(1).coerceIn(0, 24 * 60 - 1)
+        }
+        return out
+    }
+
+    /** Your chosen palette, or Terracotta (the default). */
+    private fun readPalette(o: JSONObject, d: Settings): ColorPalette =
+        enumOr(o.optString("palette"), d.palette)
 
     /** Old app versions saved Weekly automatically as the default. Settings saved before the switch to Daily move to Daily once. */
     private const val REMINDERS_VERSION = 2
@@ -80,6 +108,7 @@ internal object Storage {
             .put("demoTimeOffsetMs", s.demoTimeOffsetMs)
             .put("batchDay", s.batchDay.name)
             .put("wheelSize", s.wheelSize)
+            .put("wheelStyle", s.wheelStyle.name)
             .put("cooldownMinDays", s.cooldownMinDays)
             .put("cooldownMaxDays", s.cooldownMaxDays)
             .put("reachedMode", s.reachedMode.name)
@@ -94,15 +123,21 @@ internal object Storage {
             .put("remindersVersion", REMINDERS_VERSION)
             .put("reminderDay", s.reminderDay.name)
             .put("reminderDays", JSONArray(s.reminderDays.sortedBy { it.value }.map { it.name }))
+            .put("dailyDays", JSONArray(s.dailyDays.sortedBy { it.value }.map { it.name }))
             .put("reminderMonths", JSONArray(s.reminderMonths.sortedBy { it.value }.map { it.name }))
             .put("reminderDayOfMonth", s.reminderDayOfMonth)
             .put("windowStartMin", s.windowStartMin)
             .put("windowEndMin", s.windowEndMin)
+            .put("perDayWindows", s.perDayWindows)
+            .put("dayWindows", JSONObject().apply {
+                s.dayWindows.forEach { (day, w) -> put(day.name, JSONArray(listOf(w.first, w.second))) }
+            })
             .put("snoozes", JSONObject().apply { s.snoozes.forEach { (id, at) -> put(id, at) } })
             .put("askedNotificationPermission", s.askedNotificationPermission)
             .put("themeMode", s.themeMode.name)
             .put("textScale", s.textScale.toDouble())
             .put("palette", s.palette.name)
+            .put("paletteVersion", PALETTE_VERSION)
             .put("customMessages", JSONArray(s.customMessages))
             .put("pictureSource", s.pictureSource.name)
             .put("wheelPhotos", JSONArray(s.wheelPhotos))
@@ -125,6 +160,10 @@ internal object Storage {
         state.currentPick = if (o.has("currentPick")) o.getString("currentPick") else null
         state.pickSnoozed = state.currentPick != null && o.optBoolean("pickSnoozed", false)
         state.reswipe += strings(o.optJSONArray("reswipe"))
+        val pending = o.optJSONArray("pendingSwipe") ?: JSONArray()
+        for (i in 0 until pending.length()) {
+            runCatching { contactFromJson(pending.getJSONObject(i)) }.getOrNull()?.let { state.pendingSwipe[it.id] = it }
+        }
         return state
     }
 
@@ -135,6 +174,7 @@ internal object Storage {
         state.currentPick?.let { o.put("currentPick", it) }
         if (state.pickSnoozed) o.put("pickSnoozed", true)
         if (state.reswipe.isNotEmpty()) o.put("reswipe", JSONArray(state.reswipe.toList()))
+        if (state.pendingSwipe.isNotEmpty()) o.put("pendingSwipe", JSONArray(state.pendingSwipe.values.map(::contactToJson)))
         writeJson(file, o)
     }
 
@@ -191,8 +231,8 @@ internal object Storage {
             decidedAt = o.optLong("decidedAt"),
             cooldownUntil = if (o.has("cooldownUntil")) o.getLong("cooldownUntil") else null,
             pendingCheckAt = if (o.has("pendingCheckAt")) o.getLong("pendingCheckAt") else null,
-            customMinDays = if (o.has("customMinDays")) o.getInt("customMinDays") else null,
-            customMaxDays = if (o.has("customMaxDays")) o.getInt("customMaxDays") else null,
+            customMinDays = if (o.has("customMinDays")) o.getInt("customMinDays").coerceIn(0, 3650) else null,
+            customMaxDays = if (o.has("customMaxDays")) o.getInt("customMaxDays").coerceIn(0, 3650) else null,
         )
     }.getOrNull()
 
