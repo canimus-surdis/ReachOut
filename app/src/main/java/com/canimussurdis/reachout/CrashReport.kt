@@ -51,7 +51,7 @@ object CrashReport {
                     app.packageManager.getPackageInfo(app.packageName, 0).versionName
                 }.getOrNull()
                 val text = buildString {
-                    appendLine("Reach Out crashed")
+                    appendLine("ReachOut crashed")
                     appendLine("When: ${java.time.ZonedDateTime.now()}")
                     appendLine("Phone: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
                     appendLine("App version: ${version ?: "?"}")
@@ -84,7 +84,7 @@ fun CrashScreen(report: String, onTryAgain: () -> Unit) {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Reach Out hit a problem", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("ReachOut hit a problem", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
                 "The app closed unexpectedly last time. Tap Copy or Share and send this to whoever is fixing the app. " +
                     "Your list and settings are still saved.",
@@ -94,7 +94,7 @@ fun CrashScreen(report: String, onTryAgain: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(onClick = {
                     val clipboard = context.getSystemService(ClipboardManager::class.java)
-                    clipboard?.setPrimaryClip(ClipData.newPlainText("Reach Out crash", report))
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("ReachOut crash", report))
                     Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.weight(1f)) { Text("Copy") }
                 OutlinedButton(onClick = {

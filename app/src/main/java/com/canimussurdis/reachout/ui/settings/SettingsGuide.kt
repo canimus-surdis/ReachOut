@@ -41,7 +41,7 @@ internal class GuideSection(
 internal val GUIDE: List<GuideSection> = listOf(
     GuideSection(
         title = "The basics",
-        summary = "How Reach Out works, in one minute",
+        summary = "How ReachOut works, in one minute",
         items = listOf(
             GuideItem(
                 "Add people",
@@ -240,7 +240,7 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem("Reminders", "Turns the nudges on or off."),
             GuideItem(
                 "Notifications are off",
-                "Shows only if your phone is blocking Reach Out's notifications. Open notification settings takes you " +
+                "Shows only if your phone is blocking ReachOut's notifications. Open notification settings takes you " +
                     "straight there.",
             ),
             GuideItem("How often", "Daily (the default), Weekly, Every 2 weeks, Monthly or Yearly."),
@@ -278,7 +278,7 @@ internal val GUIDE: List<GuideSection> = listOf(
             GuideItem("Next reminder", "When the next nudge is planned."),
             GuideItem(
                 "Battery tip",
-                "Samsung and OnePlus phones can delay reminders to save battery. Set Settings → Apps → Reach Out → " +
+                "Samsung and OnePlus phones can delay reminders to save battery. Set Settings → Apps → ReachOut → " +
                     "Battery to Unrestricted so they arrive on time.",
             ),
         ),
@@ -399,7 +399,7 @@ internal val GUIDE: List<GuideSection> = listOf(
         items = listOf(
             GuideItem(
                 "Adding a widget",
-                "Press and hold an empty spot on your home screen, tap Widgets, find Reach Out, then drag the one " +
+                "Press and hold an empty spot on your home screen, tap Widgets, find ReachOut, then drag the one " +
                     "you want onto your home screen. You can resize it by pressing and holding it.",
             ),
             GuideItem(
@@ -427,7 +427,7 @@ internal val GUIDE: List<GuideSection> = listOf(
         items = listOf(
             GuideItem(
                 "Contacts (read only)",
-                "Only read when you choose to add people, to show names, numbers and photos. Reach Out never adds, " +
+                "Only read when you choose to add people, to show names, numbers and photos. ReachOut never adds, " +
                     "changes or deletes anything in your contacts.",
             ),
             GuideItem("Notifications", "Used only for reminders. You can turn them off in your phone's settings."),

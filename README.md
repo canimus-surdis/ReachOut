@@ -1,6 +1,6 @@
-# Reach Out
+# ReachOut
 
-Reach Out is an Android app that helps you stay in touch with the people who matter, made with ADHD brains in mind. Instead of a to-do list of everyone you "should" call, you pick your people once, and each week a spinning wheel chooses someone for you to reach out to. One name, one tap to call or text, and a little celebration when you connect.
+ReachOut is an Android app that helps you stay in touch with the people who matter, made with ADHD brains in mind. Instead of a to-do list of everyone you "should" call, you pick your people once, and each week a spinning wheel chooses someone for you to reach out to. One name, one tap to call or text, and a little celebration when you connect.
 
 The app was Vibe-Coded using AI, with Claude and local models, as a way to help my loved ones with ADHD.
 

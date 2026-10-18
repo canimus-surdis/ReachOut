@@ -124,7 +124,7 @@ fun WelcomeTour(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Reach Out",
+                "ReachOut",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -232,7 +232,7 @@ fun WelcomeTour(
 }
 
 private val TITLES = listOf(
-    "Welcome to Reach Out",
+    "Welcome to ReachOut",
     "Pick your people",
     "Spin the wheel",
     "Then just say hi",
@@ -242,7 +242,7 @@ private val TITLES = listOf(
 
 private val BODIES = listOf(
     "A gentle nudge to keep in touch with the people you care about, a few at a time.\n\n" +
-        "Reach Out only reads your contacts. It never changes, adds or deletes anything, " +
+        "ReachOut only reads your contacts. It never changes, adds or deletes anything, " +
         "and everything stays on your phone.",
     "Tap Add people whenever you're ready, then swipe right to keep someone or left to pass. " +
         "You can also pick from a list or a contacts file.\n\n" +

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Reach Out</string>
+    <string name="app_name">ReachOut</string>
 
     <!-- Home screen widgets: names and descriptions in the phone's widget list -->
     <string name="widget_pick_label">Who\'s up</string>

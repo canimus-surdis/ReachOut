@@ -119,7 +119,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         val target = intent?.getStringExtra(Reminders.EXTRA_OPEN) ?: return
         intent.removeExtra(Reminders.EXTRA_OPEN)
-        // Any app can open Reach Out, so a person named in the request is only trusted if they're
+        // Any app can open ReachOut, so a person named in the request is only trusted if they're
         // already the wheel's pick (the only person a reminder ever names). Otherwise just show the wheel.
         val pick = ReachOutRepository.get(applicationContext).currentPick()?.id
         openRequest.value = OpenRequest(

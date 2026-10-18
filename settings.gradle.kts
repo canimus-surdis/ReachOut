@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Reach Out"
+rootProject.name = "ReachOut"
 include(":app")

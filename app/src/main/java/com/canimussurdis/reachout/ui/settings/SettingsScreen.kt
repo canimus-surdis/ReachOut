@@ -366,7 +366,7 @@ fun SettingsScreen(
         afterAccess = null
         changed()
         if (!granted) {
-            toast("Contacts access is off. Allow it in your phone's Settings → Apps → Reach Out → Permissions, or import from a file.")
+            toast("Contacts access is off. Allow it in your phone's Settings → Apps → ReachOut → Permissions, or import from a file.")
         } else if (next == "pick") {
             openPick()
         } else if (next == "all") {
@@ -603,7 +603,7 @@ fun SettingsScreen(
                         if (Reminders.notificationsAllowed(context)) {
                             Reminders.showRegularNow(context)
                         } else {
-                            toast("Notifications are off for Reach Out. Turn them on in Settings → Reminders.")
+                            toast("Notifications are off for ReachOut. Turn them on in Settings → Reminders.")
                         }
                     },
                     onOpenTestTools = onOpenTestTools,
@@ -820,7 +820,7 @@ private fun LazyListScope.mainPage(s: Settings, snap: Snapshot, onShowTour: () -
         }
     }
     item {
-        Note("Reach Out only reads your contacts. It never changes or deletes them.")
+        Note("ReachOut only reads your contacts. It never changes or deletes them.")
     }
 }
 
@@ -1311,7 +1311,7 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
     if (!Reminders.notificationsAllowed(context)) {
         item {
             Group("Notifications are off") {
-                Note("Reach Out can't show reminders until notifications are allowed.")
+                Note("ReachOut can't show reminders until notifications are allowed.")
                 Button(onClick = {
                     val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                         .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -1422,7 +1422,7 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
     }
     item {
         Note(
-            "On Samsung and OnePlus phones, set Settings → Apps → Reach Out → Battery to Unrestricted " +
+            "On Samsung and OnePlus phones, set Settings → Apps → ReachOut → Battery to Unrestricted " +
                 "so reminders arrive on time."
         )
     }

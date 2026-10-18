@@ -33,7 +33,7 @@ object ReachOutWidgets {
     private const val ACTION_TEXT = "com.canimussurdis.reachout.widget.TEXT"
     private const val EXTRA_CONTACT = "contact"
 
-    /** Redraws every Reach Out widget on the home screen. Cheap, and safe to call from any thread. */
+    /** Redraws every ReachOut widget on the home screen. Cheap, and safe to call from any thread. */
     fun refresh(context: Context) {
         val manager = AppWidgetManager.getInstance(context) ?: return
         for (withCallText in listOf(false, true)) {
@@ -52,7 +52,7 @@ object ReachOutWidgets {
         )
 
         // Two short lines: "Reach out to" + their name, or the app's name + what to do next.
-        views.setTextViewText(R.id.widget_label, if (pick != null) "Reach out to" else "Reach Out")
+        views.setTextViewText(R.id.widget_label, if (pick != null) "Reach out to" else "ReachOut")
         views.setTextViewText(
             R.id.widget_name,
             when {

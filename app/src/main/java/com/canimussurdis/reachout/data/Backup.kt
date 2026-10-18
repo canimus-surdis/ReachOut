@@ -48,7 +48,7 @@ object Backup {
             zip.putNextEntry(ZipEntry(INFO))
             zip.write(
                 JSONObject()
-                    .put("app", "Reach Out")
+                    .put("app", "ReachOut")
                     .put("format", 1)
                     .put("createdAt", System.currentTimeMillis())
                     .toString(2).toByteArray()
@@ -74,7 +74,7 @@ object Backup {
 
     /**
      * Reads a backup and checks it fully before changing anything.
-     * Throws IllegalArgumentException with a friendly message if the file isn't a Reach Out backup.
+     * Throws IllegalArgumentException with a friendly message if the file isn't a ReachOut backup.
      */
     fun read(input: InputStream): Contents {
         val entries = HashMap<String, ByteArray>()
@@ -97,7 +97,7 @@ object Backup {
                 zip.closeEntry()
             }
         }
-        if (INFO !in entries) throw IllegalArgumentException("That file isn't a Reach Out backup.")
+        if (INFO !in entries) throw IllegalArgumentException("That file isn't a ReachOut backup.")
         val settings = parse(entries[ReachOutRepository.SETTINGS_FILE])
             ?: throw IllegalArgumentException("The backup's settings are missing or damaged.")
         val state = parse(entries[ReachOutRepository.STATE_FILE])

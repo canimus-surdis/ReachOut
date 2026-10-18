@@ -19,7 +19,7 @@
         android:importantForAccessibility="no"
         android:src="@drawable/widget_icon_tilted" />
 
-    <!-- Two short lines: "Reach out to" / their name, or "Reach Out" / "Time to say hi" -->
+    <!-- Two short lines: "Reach out to" / their name, or "ReachOut" / "Time to say hi" -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"

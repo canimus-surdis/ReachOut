@@ -144,7 +144,7 @@ fun DataInspectorScreen(repo: ReachOutRepository, onBack: () -> Unit, modifier: 
         if (!snap.settings.demoMode && !hasPermission) {
             item {
                 Section("Contacts access") {
-                    Text("Reach Out needs to read your contacts to show swipe cards. It can never change them.")
+                    Text("ReachOut needs to read your contacts to show swipe cards. It can never change them.")
                     Button(onClick = { permissionLauncher.launch(Manifest.permission.READ_CONTACTS) }) {
                         Text("Allow contacts access")
                     }
@@ -269,7 +269,7 @@ fun DataInspectorScreen(repo: ReachOutRepository, onBack: () -> Unit, modifier: 
             Section("Reminders") {
                 if (!Reminders.notificationsAllowed(context)) {
                     Text(
-                        "Notifications are off for Reach Out. Allow them in your phone's Settings → Apps → Reach Out → Notifications.",
+                        "Notifications are off for ReachOut. Allow them in your phone's Settings → Apps → ReachOut → Notifications.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

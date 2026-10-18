@@ -452,7 +452,7 @@ private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTry
                 textAlign = TextAlign.Center,
             )
             Text(
-                "Reach Out reads your contacts to show them as cards. It can never change or delete them.",
+                "ReachOut reads your contacts to show them as cards. It can never change or delete them.",
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -460,7 +460,7 @@ private fun PermissionCard(showSettingsHint: Boolean, onAllow: () -> Unit, onTry
             TextButton(onClick = onTryDemo) { Text("Try with demo contacts instead") }
             if (showSettingsHint) {
                 Text(
-                    "If nothing happens, allow Contacts in your phone's Settings → Apps → Reach Out → Permissions.",
+                    "If nothing happens, allow Contacts in your phone's Settings → Apps → ReachOut → Permissions.",
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
