@@ -385,6 +385,7 @@ fun WheelScreen(
                                 textColor = textColor,
                                 coveredColor = covered,
                                 tiltDeg = WHEEL_TILT - minOf(7f, turnsPerSecond * 2f) + wobble,
+                                restTiltDeg = WHEEL_TILT,
                                 lift = lift,
                                 kick = if (spinning) -22f * ((frac - 0.7f) / 0.3f).coerceIn(0f, 1f) else 0f,
                                 hubColor = hubColor,
@@ -708,7 +709,7 @@ private fun EmptyWheel(hasPeople: Boolean, onAddPeople: () -> Unit) {
 }
 
 /** How far the round wheel leans back, in degrees. */
-private const val WHEEL_TILT = 52f
+private const val WHEEL_TILT = 32f
 
 /** "at 6:15 PM" today, or "tomorrow at 5:00 PM". */
 private fun timeLabel(ms: Long, now: Long = System.currentTimeMillis()): String {

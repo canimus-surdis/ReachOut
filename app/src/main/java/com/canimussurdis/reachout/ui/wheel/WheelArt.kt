@@ -165,12 +165,22 @@ fun DrawScope.drawTiltedWheel(
     hubColor: Color,
     outlineColor: Color,
     pointerColor: Color,
+    /** The tilt when the wheel is still. Its size and place are fitted to this, so it doesn't grow or move while spinning. */
+    restTiltDeg: Float = tiltDeg,
 ) {
     val squash = cos(radians(tiltDeg)).toFloat()
-    val r = size.width / 2f * 0.94f
-    val cx = size.width / 2f
-    val cy = size.height * 0.47f
+    val restSquash = cos(radians(restTiltDeg)).toFloat()
     val thickness = 14.dp.toPx()
+    // Fit the whole thing (pointer above, wheel, rim below, room for the floor shadow) inside the space,
+    // centred on what you actually see. A flatter tilt makes the wheel taller, so it may need to be a bit smaller.
+    val pointerRise = 36.dp.toPx()
+    val floorRoom = 24.dp.toPx()
+    val r = minOf(
+        size.width / 2f * 0.94f,
+        (size.height - pointerRise - thickness - floorRoom) / (2f * restSquash),
+    )
+    val cx = size.width / 2f
+    val cy = (size.height - floorRoom) / 2f + (pointerRise - thickness) / 2f
     val n = segments.size
     val rimTop = if (dark) Color(0xFF3A3A40) else Color(0xFFD6D6D1)
     val rimBottom = if (dark) Color(0xFF141417) else Color(0xFF96968F)
