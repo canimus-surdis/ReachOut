@@ -16,7 +16,7 @@ Your contacts are only ever read, never changed, and everything stays on your ph
 - **See who's up from your home screen.** Widgets show the current pick, with Call and Text buttons.
 - **Make it yours.** Two wheel styles, six color palettes, light and dark mode, larger text and reduced motion.
 
-## What's new in 1.0
+## What's new in v0.17
 
 This is the first release, so everything is new.
 
