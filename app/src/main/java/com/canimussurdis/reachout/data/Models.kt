@@ -96,6 +96,8 @@ data class Settings(
 
     // ---- Reminders ----
     val remindersOn: Boolean = true,
+    /** "Keep it until you reach out": the reminder can't be cleared away until you call, text or share. */
+    val stickyReminders: Boolean = true,
     val reminderFrequency: ReminderFrequency = ReminderFrequency.DAILY,
     /** Yearly: which day of the week. */
     val reminderDay: DayOfWeek = DayOfWeek.SUNDAY,

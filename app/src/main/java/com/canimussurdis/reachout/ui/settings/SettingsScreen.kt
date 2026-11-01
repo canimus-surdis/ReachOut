@@ -145,6 +145,7 @@ private enum class Page(val title: String) {
     BACKUP("Backup & restore"),
     DEMO("Demo mode & testing"),
     GUIDE("How-to guide"),
+    ABOUT("About"),
 }
 
 /** Break lengths offered for cooldowns, in days. */
@@ -592,6 +593,7 @@ fun SettingsScreen(
                     onSave = { saveBackup.launch(Backup.suggestedFileName()) },
                     onRestore = { openBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
                 )
+                Page.ABOUT -> aboutPage()
                 Page.DEMO -> demoPage(
                     s,
                     now = snap.now,
@@ -817,10 +819,46 @@ private fun LazyListScope.mainPage(s: Settings, snap: Snapshot, onShowTour: () -
         Group("Help", list = true) {
             NavRow("How-to guide", "What every setting does, in plain words", AppIcons.Book) { open(Page.GUIDE) }
             NavRow("Welcome tour", "See the quick walkthrough again", AppIcons.Play) { onShowTour() }
+            NavRow("About", "Version ${appVersion()}", AppIcons.Info) { open(Page.ABOUT) }
         }
     }
     item {
         Note("ReachOut only reads your contacts. It never changes or deletes them.")
+    }
+}
+
+/** The version people see, like "1.00" (versionName in app/build.gradle.kts). */
+@Composable
+private fun appVersion(): String {
+    val context = LocalContext.current
+    return remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
+    }
+}
+
+/** Settings → About: the app's name and version number. */
+private fun LazyListScope.aboutPage() {
+    item {
+        Group {
+            Column(
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("ReachOut", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Version ${appVersion()}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    item {
+        Note(
+            "Vibe-Coded using AI, with Claude and local models, as a way to help my loved ones with ADHD. " +
+                "ReachOut only reads your contacts. It never changes or deletes them."
+        )
     }
 }
 
@@ -1304,7 +1342,11 @@ private fun LazyListScope.wheelPage(
 private fun LazyListScope.remindersPage(s: Settings, context: Context, update: ((Settings) -> Settings) -> Unit) {
     item {
         Group {
-            ToggleRow("Reminders", "A nudge to spin the wheel", s.remindersOn) { on -> update { it.copy(remindersOn = on) } }
+            ToggleRow("Reminders", "A nudge to spin the wheel", s.remindersOn) { on ->
+                update { it.copy(remindersOn = on) }
+                // Turning reminders off also takes away one that's showing (even one that's kept until you reach out).
+                if (!on) Reminders.clearShowing(context)
+            }
         }
     }
     if (!s.remindersOn) return
@@ -1318,6 +1360,24 @@ private fun LazyListScope.remindersPage(s: Settings, context: Context, update: (
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     runCatching { context.startActivity(intent) }
                 }) { Text("Open notification settings") }
+            }
+        }
+    }
+    item {
+        Group("Until you reach out") {
+            ToggleRow(
+                "Keep it until you reach out",
+                if (s.stickyReminders) {
+                    "The reminder stays in your notifications until you call, text or share. Clear all skips it, " +
+                        "and if you swipe it away it comes right back."
+                } else {
+                    "Off: you can swipe the reminder away like any other."
+                },
+                s.stickyReminders,
+            ) { on ->
+                update { it.copy(stickyReminders = on) }
+                // A reminder that's showing now switches over straight away.
+                Reminders.refreshShowing(context)
             }
         }
     }

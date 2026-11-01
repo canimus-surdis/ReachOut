@@ -52,6 +52,7 @@ object AppIcons {
     val Download = line("Download", "M12 3v12M7.5 10.5 12 15l4.5-4.5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17")
     val Flask = line("Flask", "M9 3h6M10 3v6l-5 9.5A1.7 1.7 0 0 0 6.5 21h11a1.7 1.7 0 0 0 1.5-2.5L14 9V3")
     val Book = line("Book", "M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5zM4 20.5A2.5 2.5 0 0 0 6.5 23H20")
+    val Info = line("Info", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5.5M12 7.5v.01")
     val Play = line("Play", "M7 4.5v15l12-7.5z")
     val File = line("File", "M6 3h8l4 4v14H6z", "M14 3v4h4M9 12h6M9 16h6")
     val ListCheck = line("ListCheck", "M10 6h10M10 12h10M10 18h10", "m3.5 6 1.5 1.5L7.5 5M3.5 12l1.5 1.5L7.5 11M3.5 18l1.5 1.5L7.5 17")

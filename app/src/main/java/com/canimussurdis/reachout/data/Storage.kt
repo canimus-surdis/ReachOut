@@ -31,6 +31,7 @@ internal object Storage {
             spinVibration = o.optBoolean("spinVibration", d.spinVibration),
             reduceMotion = o.optBoolean("reduceMotion", d.reduceMotion),
             remindersOn = o.optBoolean("remindersOn", d.remindersOn),
+            stickyReminders = o.optBoolean("stickyReminders", d.stickyReminders),
             reminderFrequency = readFrequency(o, d),
             reminderDay = enumOr(o.optString("reminderDay"), d.reminderDay),
             // Older versions had one weekly day: start the multi-day choice from it.
@@ -119,6 +120,7 @@ internal object Storage {
             .put("spinVibration", s.spinVibration)
             .put("reduceMotion", s.reduceMotion)
             .put("remindersOn", s.remindersOn)
+            .put("stickyReminders", s.stickyReminders)
             .put("reminderFrequency", s.reminderFrequency.name)
             .put("remindersVersion", REMINDERS_VERSION)
             .put("reminderDay", s.reminderDay.name)

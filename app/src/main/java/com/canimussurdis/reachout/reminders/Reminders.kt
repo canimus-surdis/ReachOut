@@ -18,6 +18,7 @@ import com.canimussurdis.reachout.R
 import com.canimussurdis.reachout.data.ReachOutRepository
 import com.canimussurdis.reachout.data.ReminderFrequency
 import com.canimussurdis.reachout.data.Settings
+import com.canimussurdis.reachout.widget.ReachOutWidgets
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -43,8 +44,14 @@ object Reminders {
     private const val CHANNEL_ID = "reminders"
     private const val ACTION_REMINDER = "com.canimussurdis.reachout.REMINDER"
     private const val ACTION_SNOOZE = "com.canimussurdis.reachout.SNOOZE"
+    /** Snooze 1 hr, tapped on a reminder. */
+    private const val ACTION_SNOOZE_TAPPED = "com.canimussurdis.reachout.SNOOZE_TAPPED"
+    /** A "keep it until you reach out" reminder was swiped away: put it back. */
+    private const val ACTION_DISMISSED = "com.canimussurdis.reachout.DISMISSED"
     private const val EXTRA_CONTACT = "contact"
     private const val REGULAR_ID = 1
+    /** Stands in for a contact id when the "spin the wheel" reminder is snoozed (nobody is picked yet). */
+    private const val WHEEL_KEY = "__wheel__"
 
     // ---------------- Scheduling ----------------
 
@@ -113,7 +120,8 @@ object Reminders {
     fun clearFor(context: Context, ids: Collection<String>) {
         if (ids.isEmpty()) return
         val repo = ReachOutRepository.get(context)
-        val gone = ids.toSet()
+        // Reaching out also ends a snoozed "spin the wheel" reminder.
+        val gone = ids.toSet() + WHEEL_KEY
         if (repo.settings.snoozes.keys.any { it in gone }) {
             repo.changeSettings { it.copy(snoozes = it.snoozes - gone) }
         }
@@ -243,43 +251,70 @@ object Reminders {
     /** Test tools: show the regular reminder right now. */
     fun showRegularNow(context: Context) = postRegular(context)
 
+    /**
+     * If a reminder is showing, post it again with what's true now: who the wheel picked, and whether
+     * "Keep it until you reach out" is on. Does nothing when no reminder is showing.
+     */
+    fun refreshShowing(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val showing = runCatching { manager.activeNotifications.map { it.id } }.getOrDefault(emptyList())
+        if (REGULAR_ID in showing) postRegular(context)
+    }
+
+    /** Takes away every reminder that's showing (Settings → Reminders turned off). */
+    fun clearShowing(context: Context) {
+        NotificationManagerCompat.from(context).cancelAll()
+    }
+
     private fun postRegular(context: Context) {
-        // Someone was snoozed and is still waiting: name them instead of the usual nudge.
+        // Someone was picked and hasn't been reached yet: name them instead of the usual nudge.
         val repo = ReachOutRepository.get(context)
-        val waiting = if (repo.isPickSnoozed()) repo.currentPick() else null
-        if (waiting != null) {
-            post(
-                context,
-                id = REGULAR_ID,
-                title = "Reminder: reach out to ${waiting.name}",
-                text = "Tap to call, text or share.",
-                open = waiting.id,
-            )
+        val pick = repo.currentPick()
+        if (pick != null) {
+            postPick(context, REGULAR_ID, pick.id, pick.name)
             return
         }
+        val sticky = repo.settings.stickyReminders
         post(
             context,
             id = REGULAR_ID,
             title = "Time to reach out to someone",
-            text = "Spin the wheel and say hi.",
+            text = if (sticky) "Spin the wheel to see who's up." else "Spin the wheel and say hi.",
             open = OPEN_WHEEL,
+            pickId = null,
         )
     }
 
     private fun postSnooze(context: Context, contactId: String) {
         val name = ReachOutRepository.get(context).contactById(contactId)?.name
+        if (name == null) {
+            postRegular(context)
+            return
+        }
+        postPick(context, snoozeRequestCode(contactId), contactId, name)
+    }
+
+    private fun postPick(context: Context, id: Int, contactId: String, name: String) {
+        val sticky = ReachOutRepository.get(context).settings.stickyReminders
+        val first = name.trim().substringBefore(' ').ifBlank { name }
         post(
             context,
-            id = snoozeRequestCode(contactId),
-            title = if (name != null) "Reminder: reach out to $name" else "Time to reach out to someone",
-            text = if (name != null) "Tap to call, text or share." else "Spin the wheel and say hi.",
-            open = if (name != null) contactId else OPEN_WHEEL,
+            id = id,
+            title = "Reach out to $name",
+            text = if (sticky) "$first is your pick. Call or text to clear this." else "Tap to call, text or share.",
+            open = contactId,
+            pickId = contactId,
         )
     }
 
+    /** A request code for one of a notification's buttons (k = which button). */
+    private fun buttonCode(id: Int, k: Int) = 50_000 + (id and 0xFFFF) * 8 + k
+
     @SuppressLint("MissingPermission") // checked by notificationsAllowed() just below
-    private fun post(context: Context, id: Int, title: String, text: String, open: String) {
+    private fun post(context: Context, id: Int, title: String, text: String, open: String, pickId: String?) {
         if (!notificationsAllowed(context)) return
+        val repo = ReachOutRepository.get(context)
+        val sticky = repo.settings.stickyReminders
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
@@ -294,17 +329,66 @@ object Reminders {
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+
+        // The lock screen gets this version: just the reminder, no buttons.
+        val lockScreen = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(0xFFB95C40.toInt())
+            .setContentTitle(title)
+            .setContentText(text)
+            .build()
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setColor(0xFFB95C40.toInt()) // terracotta, to match the app
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(tap)
-            .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .build()
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(lockScreen)
+
+        // Buttons: Call and Text for the pick (they count as reaching out and clear this), Spin when
+        // nobody's picked yet, and Snooze 1 hr (once per pick, the same as in the app).
+        val number = pickId?.let { repo.contactById(it)?.mainNumber }
+        if (pickId != null && number != null) {
+            builder.addAction(0, "Call", ReachOutWidgets.actionIntent(context, ReachOutWidgets.ACTION_CALL, pickId, buttonCode(id, 0)))
+            builder.addAction(0, "Text", ReachOutWidgets.actionIntent(context, ReachOutWidgets.ACTION_TEXT, pickId, buttonCode(id, 1)))
+        }
+        if (pickId == null) builder.addAction(0, "Spin the wheel", tap)
+        if (pickId == null || !repo.isPickSnoozed()) {
+            val snooze = PendingIntent.getBroadcast(
+                context,
+                buttonCode(id, 2),
+                Intent(context, ReminderReceiver::class.java)
+                    .setAction(ACTION_SNOOZE_TAPPED)
+                    .putExtra(EXTRA_CONTACT, pickId ?: WHEEL_KEY),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(0, "Snooze 1 hr", snooze)
+        }
+
+        if (sticky) {
+            // Stays until you reach out: Clear all skips it, it can't be swiped away on the lock screen,
+            // and if it's swiped away anywhere else (Android 14 and newer allow that) it's put back.
+            val putBack = PendingIntent.getBroadcast(
+                context,
+                buttonCode(id, 3),
+                Intent(context, ReminderReceiver::class.java)
+                    .setAction(ACTION_DISMISSED)
+                    .apply { if (id != REGULAR_ID && pickId != null) putExtra(EXTRA_CONTACT, pickId) },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.setOngoing(true)
+                .setAutoCancel(false)
+                .setOnlyAlertOnce(true) // putting it back doesn't make a sound again
+                .setDeleteIntent(putBack)
+        } else {
+            builder.setAutoCancel(true)
+        }
+
         try {
-            NotificationManagerCompat.from(context).notify(id, notification)
+            NotificationManagerCompat.from(context).notify(id, builder.build())
         } catch (e: SecurityException) {
             // Permission was revoked between the check and now; nothing to do.
         }
@@ -330,7 +414,43 @@ object Reminders {
                 val id = intent.getStringExtra(EXTRA_CONTACT) ?: return
                 if (id !in repo.settings.snoozes) return // cancelled, e.g. demo mode was switched
                 repo.changeSettings { it.copy(snoozes = it.snoozes - id) }
-                postSnooze(context, id)
+                if (id == WHEEL_KEY) {
+                    if (repo.settings.remindersOn && repo.hasAcceptedContacts()) postRegular(context)
+                } else {
+                    postSnooze(context, id)
+                }
+            }
+            // Snooze 1 hr on the reminder itself.
+            ACTION_SNOOZE_TAPPED -> {
+                val id = intent.getStringExtra(EXTRA_CONTACT) ?: return
+                val shown = NotificationManagerCompat.from(context)
+                if (id == WHEEL_KEY) {
+                    shown.cancel(REGULAR_ID)
+                    scheduleSnoozeAt(context, WHEEL_KEY, fitIntoWindow(repo.now() + 60 * 60_000L, repo.settings))
+                } else {
+                    // Only for the person who's still the pick, and only once per pick.
+                    if (repo.currentPick()?.id != id) return
+                    if (repo.isPickSnoozed()) {
+                        // Already snoozed in the app: show the reminder again without the Snooze button.
+                        refreshShowing(context)
+                        return
+                    }
+                    repo.snoozeCurrentPick()
+                    shown.cancel(REGULAR_ID)
+                    shown.cancel(snoozeRequestCode(id))
+                    snoozeOneHour(context, id)
+                }
+            }
+            // A "keep it until you reach out" reminder was swiped away: put it back if it's still needed.
+            ACTION_DISMISSED -> {
+                val s = repo.settings
+                if (!s.stickyReminders || !s.remindersOn) return
+                val id = intent.getStringExtra(EXTRA_CONTACT)
+                if (id == null) {
+                    if (repo.hasAcceptedContacts()) postRegular(context)
+                } else if (repo.currentPick()?.id == id) {
+                    postSnooze(context, id)
+                }
             }
             // Phone restarted, app updated, or the clock/time zone changed: plan again.
             else -> rescheduleAll(context)

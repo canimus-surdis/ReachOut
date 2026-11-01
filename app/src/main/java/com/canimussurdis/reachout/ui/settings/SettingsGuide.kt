@@ -243,6 +243,16 @@ internal val GUIDE: List<GuideSection> = listOf(
                 "Shows only if your phone is blocking ReachOut's notifications. Open notification settings takes you " +
                     "straight there.",
             ),
+            GuideItem(
+                "Keep it until you reach out",
+                "On to start with. The reminder stays in your notifications until you call, text or share your pick, " +
+                    "from the reminder or from the app. Clear all skips it, and on the lock screen it can't be swiped " +
+                    "away. On Android 14 and newer you can still swipe it away when the phone is unlocked, so it comes " +
+                    "right back. The reminder has Call, Text and Snooze 1 hr buttons (Spin the wheel if nobody's " +
+                    "picked yet). Snooze hides it for an hour, once per pick. The lock screen shows just the reminder, " +
+                    "without the buttons, when your phone hides notification details there. Turn this off to swipe " +
+                    "reminders away like any other.",
+            ),
             GuideItem("How often", "Daily (the default), Weekly, Every 2 weeks, Monthly or Yearly."),
             GuideItem(
                 "On these days",
@@ -391,6 +401,7 @@ internal val GUIDE: List<GuideSection> = listOf(
                 "Six short pages showing how swiping, the wheel and check-ins work. It opens by itself the first time the " +
                     "app runs after it's installed, and you can replay it any time.",
             ),
+            GuideItem("About", "Settings → About shows which version of ReachOut you have, for example 1.00."),
         ),
     ),
     GuideSection(

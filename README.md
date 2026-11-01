@@ -12,9 +12,16 @@ Your contacts are only ever read, never changed, and everything stays on your ph
 - **Spin to choose who to contact.** A fresh wheel of up to 12 names each week. Tap Spin and the app picks one person for you.
 - **Reach out in one tap.** Call, Text or Share straight from the pick, with an optional pre-filled message.
 - **Check in afterwards.** "Did you connect?" Yes earns confetti and gives that person a break before they come up again.
-- **Get gentle reminders.** Nudges to spin on the days and hours that suit you.
+- **Get gentle reminders.** Nudges to spin on the days and hours that suit you. A reminder can stay in your notifications until you reach out, with Call, Text and Snooze buttons.
 - **See who's up from your home screen.** Widgets show the current pick, with Call and Text buttons.
 - **Make it yours.** Two wheel styles, six color palettes, light and dark mode, larger text and reduced motion.
+
+## Coming in v1.00
+
+- **Reminders that stay until you reach out** (Settings › Reminders › Keep it until you reach out, on by default). Clear all skips the reminder, it can't be swiped away on the lock screen, and if it's swiped away when the phone is unlocked it comes right back. It clears when you call, text or share your pick.
+- **Buttons on the reminder:** Call, Text and Snooze 1 hr (or Spin the wheel when nobody's picked yet). The lock screen shows just the reminder, without buttons, when the phone hides notification details there.
+- **Flatter round wheel:** it tilts back 32° instead of 52°, and sizes itself to fit the screen.
+- **About screen** (Settings › About) showing the version number.
 
 ## What's new in v0.17
 

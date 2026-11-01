@@ -311,12 +311,19 @@ class ReachOutRepository private constructor(private val context: Context) {
     // ---------------- The wheel's pick ----------------
 
     /** Remember who the wheel picked, so the box stays until you act on it. */
-    fun setCurrentPick(id: String?) = synchronized(lock) {
-        if (state.currentPick != id) {
-            state.currentPick = id
-            state.pickSnoozed = false // a new pick gets its own snooze
-            save()
+    fun setCurrentPick(id: String?) {
+        val changed = synchronized(lock) {
+            if (state.currentPick != id) {
+                state.currentPick = id
+                state.pickSnoozed = false // a new pick gets its own snooze
+                save()
+                true
+            } else {
+                false
+            }
         }
+        // A reminder that's showing "Time to reach out to someone" now names who the wheel picked.
+        if (changed && id != null) Reminders.refreshShowing(context)
     }
 
     /** Snooze uses up the pick's one snooze; the person stays picked until you reach out. */
@@ -503,6 +510,8 @@ class ReachOutRepository private constructor(private val context: Context) {
             state = Storage.readState(stateFile())
             updateWidgets()
         }
+        // A reminder showing now belongs to the other list (real or demo), so take it away.
+        Reminders.clearShowing(context)
         Reminders.rescheduleAll(context)
     }
 
@@ -533,6 +542,7 @@ class ReachOutRepository private constructor(private val context: Context) {
             state = AppState()
             updateWidgets()
         }
+        Reminders.clearShowing(context)
         Reminders.rescheduleAll(context)
     }
 

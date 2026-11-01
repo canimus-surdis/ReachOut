@@ -29,8 +29,8 @@ import com.canimussurdis.reachout.reminders.Reminders
  */
 object ReachOutWidgets {
 
-    private const val ACTION_CALL = "com.canimussurdis.reachout.widget.CALL"
-    private const val ACTION_TEXT = "com.canimussurdis.reachout.widget.TEXT"
+    internal const val ACTION_CALL = "com.canimussurdis.reachout.widget.CALL"
+    internal const val ACTION_TEXT = "com.canimussurdis.reachout.widget.TEXT"
     private const val EXTRA_CONTACT = "contact"
 
     /** Redraws every ReachOut widget on the home screen. Cheap, and safe to call from any thread. */
@@ -91,7 +91,8 @@ object ReachOutWidgets {
         return views
     }
 
-    private fun actionIntent(context: Context, action: String, contactId: String, requestCode: Int): PendingIntent =
+    /** Call or Text for [contactId], used by the widget and by reminder notifications. */
+    internal fun actionIntent(context: Context, action: String, contactId: String, requestCode: Int): PendingIntent =
         PendingIntent.getActivity(
             context,
             requestCode,
@@ -102,7 +103,7 @@ object ReachOutWidgets {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    /** Call or Text from the widget: counts as reaching out, then opens the dialer or messages app. */
+    /** Call or Text from a widget or a reminder: counts as reaching out, then opens the dialer or messages app. */
     internal fun handleAction(activity: Activity, intent: Intent) {
         val repo = ReachOutRepository.get(activity.applicationContext)
         val pick = repo.currentPick()
