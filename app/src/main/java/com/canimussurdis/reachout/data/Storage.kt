@@ -32,6 +32,7 @@ internal object Storage {
             reduceMotion = o.optBoolean("reduceMotion", d.reduceMotion),
             remindersOn = o.optBoolean("remindersOn", d.remindersOn),
             stickyReminders = o.optBoolean("stickyReminders", d.stickyReminders),
+            stickyPosted = o.optBoolean("stickyPosted", d.stickyPosted),
             reminderFrequency = readFrequency(o, d),
             reminderDay = enumOr(o.optString("reminderDay"), d.reminderDay),
             // Older versions had one weekly day: start the multi-day choice from it.
@@ -121,6 +122,7 @@ internal object Storage {
             .put("reduceMotion", s.reduceMotion)
             .put("remindersOn", s.remindersOn)
             .put("stickyReminders", s.stickyReminders)
+            .put("stickyPosted", s.stickyPosted)
             .put("reminderFrequency", s.reminderFrequency.name)
             .put("remindersVersion", REMINDERS_VERSION)
             .put("reminderDay", s.reminderDay.name)

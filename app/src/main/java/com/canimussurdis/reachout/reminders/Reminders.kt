@@ -10,6 +10,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -47,7 +49,7 @@ object Reminders {
     /** Snooze 1 hr, tapped on a reminder. */
     private const val ACTION_SNOOZE_TAPPED = "com.canimussurdis.reachout.SNOOZE_TAPPED"
     /** A "keep it until you reach out" reminder was swiped away: put it back. */
-    private const val ACTION_DISMISSED = "com.canimussurdis.reachout.DISMISSED"
+    internal const val ACTION_DISMISSED = "com.canimussurdis.reachout.DISMISSED"
     private const val EXTRA_CONTACT = "contact"
     private const val REGULAR_ID = 1
     /** Stands in for a contact id when the "spin the wheel" reminder is snoozed (nobody is picked yet). */
@@ -75,6 +77,25 @@ object Reminders {
         repo.settings.snoozes.forEach { (id, at) ->
             alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, maxOf(at - offset, realNow + 60_000L), snoozeIntent(context, id))
         }
+        // After a restart the phone has no notifications, so put back one that's kept until you reach out.
+        restoreIfMissing(context)
+    }
+
+    /**
+     * If a reminder that's kept until you reach out was posted and not dealt with, but isn't showing
+     * (swiped away, phone restarted, app updated), post it again.
+     */
+    fun restoreIfMissing(context: Context) {
+        val repo = ReachOutRepository.get(context)
+        val s = repo.settings
+        if (!s.stickyPosted) return
+        if (!s.stickyReminders || !s.remindersOn || !repo.hasAcceptedContacts()) {
+            repo.changeSettings { it.copy(stickyPosted = false) }
+            return
+        }
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val showing = runCatching { manager.activeNotifications.isNotEmpty() }.getOrDefault(true)
+        if (!showing) postRegular(context)
     }
 
     /**
@@ -133,6 +154,7 @@ object Reminders {
         }
         // A reminder already showing may name them, so clear it too. The next one comes as planned.
         shown.cancel(REGULAR_ID)
+        if (repo.settings.stickyPosted) repo.changeSettings { it.copy(stickyPosted = false) }
     }
 
     /** How far the app's clock is ahead of the real one (only in demo mode, after time travel). */
@@ -264,6 +286,8 @@ object Reminders {
     /** Takes away every reminder that's showing (Settings → Reminders turned off). */
     fun clearShowing(context: Context) {
         NotificationManagerCompat.from(context).cancelAll()
+        val repo = ReachOutRepository.get(context)
+        if (repo.settings.stickyPosted) repo.changeSettings { it.copy(stickyPosted = false) }
     }
 
     private fun postRegular(context: Context) {
@@ -379,6 +403,7 @@ object Reminders {
                     .apply { if (id != REGULAR_ID && pickId != null) putExtra(EXTRA_CONTACT, pickId) },
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
+            if (!repo.settings.stickyPosted) repo.changeSettings { it.copy(stickyPosted = true) }
             builder.setOngoing(true)
                 .setAutoCancel(false)
                 .setOnlyAlertOnce(true) // putting it back doesn't make a sound again
@@ -424,6 +449,8 @@ object Reminders {
             ACTION_SNOOZE_TAPPED -> {
                 val id = intent.getStringExtra(EXTRA_CONTACT) ?: return
                 val shown = NotificationManagerCompat.from(context)
+                // Snoozed on purpose: it comes back when the snooze ends, not before.
+                repo.changeSettings { it.copy(stickyPosted = false) }
                 if (id == WHEEL_KEY) {
                     shown.cancel(REGULAR_ID)
                     scheduleSnoozeAt(context, WHEEL_KEY, fitIntoWindow(repo.now() + 60 * 60_000L, repo.settings))
@@ -461,6 +488,18 @@ object Reminders {
 /** Receives alarm and restart broadcasts. Declared in AndroidManifest.xml. */
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Reminders.ACTION_DISMISSED) {
+            // Swiped away: put it back after a moment, once the phone has finished removing it.
+            val pending = goAsync()
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    Reminders.handle(context.applicationContext, intent)
+                } finally {
+                    pending.finish()
+                }
+            }, 700L)
+            return
+        }
         Reminders.handle(context, intent)
     }
 }

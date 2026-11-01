@@ -16,7 +16,7 @@ Your contacts are only ever read, never changed, and everything stays on your ph
 - **See who's up from your home screen.** Widgets show the current pick, with Call and Text buttons.
 - **Make it yours.** Two wheel styles, six color palettes, light and dark mode, larger text and reduced motion.
 
-## Coming in v1.00
+## Coming in v1.0.1
 
 - **Reminders that stay until you reach out** (Settings › Reminders › Keep it until you reach out, on by default). Clear all skips the reminder, it can't be swiped away on the lock screen, and if it's swiped away when the phone is unlocked it comes right back. It clears when you call, text or share your pick.
 - **Buttons on the reminder:** Call, Text and Snooze 1 hr (or Spin the wheel when nobody's picked yet). The lock screen shows just the reminder, without buttons, when the phone hides notification details there.

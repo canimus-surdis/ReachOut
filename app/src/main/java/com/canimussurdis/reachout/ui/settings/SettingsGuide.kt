@@ -401,7 +401,7 @@ internal val GUIDE: List<GuideSection> = listOf(
                 "Six short pages showing how swiping, the wheel and check-ins work. It opens by itself the first time the " +
                     "app runs after it's installed, and you can replay it any time.",
             ),
-            GuideItem("About", "Settings → About shows which version of ReachOut you have, for example 1.00."),
+            GuideItem("About", "Settings → About shows which version of ReachOut you have, for example 1.0.1."),
         ),
     ),
     GuideSection(

@@ -113,6 +113,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // A reminder that's kept until you reach out comes back if it went missing.
+        Reminders.restoreIfMissing(applicationContext)
         resumeCount.intValue++
     }
 
